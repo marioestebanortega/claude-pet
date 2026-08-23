@@ -42,3 +42,6 @@ pet-usage.json
 *.log
 *.tmp
 scratch/
+
+# Paquetes generados para compartir
+ClaudePet-*.zip

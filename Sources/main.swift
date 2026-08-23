@@ -1,6 +1,8 @@
 import SwiftUI
 import AppKit
 import Combine
+import UserNotifications
+import ServiceManagement
 
 // ─────────────────────────────────────────────────────────────
 // MARK: - Modelo
@@ -380,6 +382,91 @@ final class FileWatcher {
 // MARK: - Estado global
 // ─────────────────────────────────────────────────────────────
 
+/// Notificaciones nativas.
+///
+/// Antes esto era `osascript -e 'display notification'`, que pedía permiso de
+/// Automatización y las mostraba a nombre de "Script Editor". Con UserNotifications
+/// salen como Claude Pet, el usuario las controla desde Ajustes → Notificaciones,
+/// y el permiso se pide UNA vez: la primera que de verdad haya algo que avisar.
+@MainActor
+final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+    static let shared = Notifier()
+
+    /// Si el usuario las bloqueó, el interruptor del panel no serviría de nada
+    /// y hay que decírselo en vez de fallar en silencio.
+    @Published private(set) var denied = false
+
+    private var authorized = false
+    private var asked = false
+    private var pending: (String, String)?
+
+    /// Lee el estado real del sistema; el usuario pudo cambiarlo en Ajustes.
+    func refreshStatus() {
+        guard available else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { st in
+            Task { @MainActor in
+                self.denied = st.authorizationStatus == .denied
+                self.authorized = st.authorizationStatus == .authorized
+                                || st.authorizationStatus == .provisional
+                self.asked = st.authorizationStatus != .notDetermined
+            }
+        }
+    }
+
+    func openSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
+        NSWorkspace.shared.open(url)
+    }
+
+    /// UNUserNotificationCenter necesita un bundle de verdad; suelto no arranca.
+    private var available: Bool { Bundle.main.bundleIdentifier != nil }
+
+    func send(title: String, body: String) {
+        guard available else { return }
+        guard asked else {
+            pending = (title, body)
+            requestOnce()
+            return
+        }
+        guard authorized else { return }
+        deliver(title: title, body: body)
+    }
+
+    /// Se pide de forma perezosa: quien nunca llegue al 50 % nunca ve el diálogo.
+    private func requestOnce() {
+        guard !asked else { return }
+        asked = true
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            Task { @MainActor in
+                self.authorized = granted
+                self.denied = !granted
+                if granted, let (t, b) = self.pending { self.deliver(title: t, body: b) }
+                self.pending = nil
+            }
+        }
+    }
+
+    private func deliver(title: String, body: String) {
+        let c = UNMutableNotificationContent()
+        c.title = title
+        c.body = body
+        c.sound = .default
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+    }
+
+    /// Que se vean aunque Clawd tenga el foco.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+}
+
 @MainActor
 final class PetStore: ObservableObject {
     static let shared = PetStore()
@@ -404,6 +491,19 @@ final class PetStore: ObservableObject {
     @Published var tintClawd: Bool {
         didSet { UserDefaults.standard.set(tintClawd, forKey: "tintClawd") }
     }
+    /// Arranque al iniciar sesión, vía SMAppService.
+    ///
+    /// Antes esto era un script con AppleScript + System Events, que pedía permiso de
+    /// Automatización. SMAppService no pide nada y aparece en Ajustes → General →
+    /// Ítems de inicio con el nombre de la app, donde se puede quitar a mano.
+    @Published var launchAtLogin: Bool {
+        didSet {
+            guard !syncingLogin else { return }
+            applyLaunchAtLogin(launchAtLogin)
+        }
+    }
+    @Published private(set) var loginError: String?
+
     /// Si está activo, cada tanto a Clawd le da por hacer algo.
     @Published var activitiesEnabled: Bool {
         didSet {
@@ -432,6 +532,7 @@ final class PetStore: ObservableObject {
 
     private var timer: Timer?
     private var activityTimer: Timer?
+    private var syncingLogin = false
     private var watchers: [FileWatcher] = []
     private var bubbleTask: DispatchWorkItem?
     private var lastNotifiedStep = -1
@@ -445,6 +546,9 @@ final class PetStore: ObservableObject {
         notifyEnabled = d.object(forKey: "notifyEnabled") as? Bool ?? true
         tintClawd     = d.object(forKey: "tintClawd") as? Bool ?? false
         activitiesEnabled = d.object(forKey: "activitiesEnabled") as? Bool ?? true
+        // La verdad la tiene el sistema, no UserDefaults: el usuario pudo quitarlo
+        // a mano desde Ajustes y hay que reflejarlo.
+        launchAtLogin = SMAppService.mainApp.status == .enabled
         pollSeconds   = d.object(forKey: "pollSeconds") as? Int ?? 60
     }
 
@@ -482,6 +586,20 @@ final class PetStore: ObservableObject {
             }
         }
         activity = .idle
+    }
+
+    private func applyLaunchAtLogin(_ on: Bool) {
+        loginError = nil
+        do {
+            if on { try SMAppService.mainApp.register() }
+            else  { try SMAppService.mainApp.unregister() }
+        } catch {
+            loginError = error.localizedDescription
+            // Si falló, el interruptor debe volver a lo que diga el sistema.
+            syncingLogin = true
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+            syncingLogin = false
+        }
     }
 
     /// Programa la próxima ocurrencia. Los intervalos son largos a propósito:
@@ -584,13 +702,7 @@ final class PetStore: ObservableObject {
     }
 
     private func notify(title: String, body: String) {
-        func esc(_ s: String) -> String {
-            s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = ["-e", "display notification \"\(esc(body))\" with title \"\(esc(title))\" sound name \"Submarine\""]
-        try? p.run()
+        Notifier.shared.send(title: title, body: body)
     }
 }
 
@@ -1112,6 +1224,7 @@ struct Triangle: Shape {
 
 struct PanelView: View {
     @ObservedObject var store = PetStore.shared
+    @ObservedObject var notifier = Notifier.shared
 
     private let pollOptions: [(Int, String)] = [
         (15, "cada 15 s"), (30, "cada 30 s"), (60, "cada minuto"),
@@ -1143,6 +1256,12 @@ struct PanelView: View {
                     .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
+            }
+
+            if let err = store.loginError {
+                Text("No pude cambiar el arranque automático: \(err)")
+                    .font(.system(size: 9)).foregroundStyle(Mood.alert.textColor)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let err = store.errorMsg {
@@ -1182,8 +1301,19 @@ struct PanelView: View {
                     }
                     .labelsHidden().controlSize(.small)
                 }
+                Toggle("Abrir al iniciar sesión", isOn: $store.launchAtLogin)
                 Toggle("Mascota en el escritorio", isOn: $store.petVisible)
                 Toggle("Avisarme al cruzar 50/70/90 %", isOn: $store.notifyEnabled)
+                if store.notifyEnabled && notifier.denied {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bell.slash")
+                        Text("Bloqueadas por el sistema.")
+                        Button("Abrir Ajustes") { notifier.openSettings() }
+                            .buttonStyle(.link)
+                    }
+                    .font(.system(size: 9))
+                    .foregroundStyle(Mood.alert.textColor)
+                }
                 Toggle("Clawd cambia de color con el humor", isOn: $store.tintClawd)
                 Toggle("Actividades: café, siesta, baile…", isOn: $store.activitiesEnabled)
                 HStack(spacing: 10) {
@@ -1355,6 +1485,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         if CommandLine.arguments.contains("--dump") { Self.dumpAndExit() }
+        if CommandLine.arguments.contains("--login-on")  { Self.setLoginAndExit(true) }
+        if CommandLine.arguments.contains("--login-off") { Self.setLoginAndExit(false) }
         NSApp.setActivationPolicy(.accessory)
         let store = PetStore.shared
         store.onPetVisibilityChange = { [weak self] v in
@@ -1367,7 +1499,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         setPet(store.petVisible)
+        Notifier.shared.refreshStatus()
         store.start()
+    }
+
+    static func setLoginAndExit(_ on: Bool) -> Never {
+        do {
+            if on { try SMAppService.mainApp.register() }
+            else  { try SMAppService.mainApp.unregister() }
+            print(on ? "✅ Arrancará al iniciar sesión." : "✅ Ya no arranca al iniciar sesión.")
+        } catch {
+            print("❌ \(error.localizedDescription)")
+        }
+        exit(0)
+    }
+
+    static func loginStatusText() -> String {
+        switch SMAppService.mainApp.status {
+        case .enabled:          return "activado"
+        case .notRegistered:    return "no activado"
+        case .requiresApproval: return "pendiente de aprobación en Ajustes → Ítems de inicio"
+        case .notFound:         return "no encontrado"
+        @unknown default:       return "desconocido"
+        }
     }
 
     /// Modo diagnóstico: `ClaudePet.app/Contents/MacOS/ClaudePet --dump`
@@ -1386,6 +1540,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             print("SIN DATOS")
         }
+
+        print("")
+        print("Permisos que usa esta app:")
+        print("  Archivos      : solo ~/.claude.json y ~/.claude/pet-usage.json (el home no")
+        print("                  está protegido por TCC, así que no pide nada)")
+        print("  Red           : ninguna")
+        print("  Automatización: ninguna")
+        print("  Accesibilidad : ninguna")
+        print("  Notificaciones: se piden la primera vez que hay algo que avisar")
+        print("  Inicio sesión : \(loginStatusText())")
+        let sem = DispatchSemaphore(value: 0)
+        UNUserNotificationCenter.current().getNotificationSettings { st in
+            let map: [UNAuthorizationStatus: String] = [
+                .notDetermined: "aún no se han pedido",
+                .denied: "denegadas",
+                .authorized: "concedidas",
+                .provisional: "provisionales",
+            ]
+            print("  → estado actual de notificaciones: \(map[st.authorizationStatus] ?? "?")")
+            sem.signal()
+        }
+        _ = sem.wait(timeout: .now() + 3)
         exit(0)
     }
 

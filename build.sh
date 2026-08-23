@@ -6,6 +6,13 @@ cd "$(dirname "$0")"
 APP="ClaudePet.app"
 BIN="$APP/Contents/MacOS/ClaudePet"
 
+if ! xcrun --find swiftc >/dev/null 2>&1; then
+  echo "❌ Falta el compilador de Swift."
+  echo "   Instala las Command Line Tools (gratis, ~1 GB, no hace falta Xcode entero):"
+  echo "       xcode-select --install"
+  exit 1
+fi
+
 echo "→ Compilando…"
 rm -rf "$APP" build
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

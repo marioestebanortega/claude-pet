@@ -129,10 +129,27 @@ se activa una vez y se queda. Los fotogramas discretos van con un `Timer` que
 incrementa un contador (`beat`); lo continuo (flotar, inclinarse, estirarse) sí va
 con modificadores animables sobre el lienzo entero.
 
+## Permisos
+
+Casi ninguno, y a propósito: **sin red, sin Automatización, sin Accesibilidad, sin
+acceso a archivos protegidos**. Solo lee dos archivos del home, que macOS no protege
+con TCC. Ver [INSTALAR.md](INSTALAR.md) para el detalle y para compartirla con alguien.
+
+Lo único que puede preguntar:
+
+- **Notificaciones**, una vez, y solo la primera vez que haya algo que avisar (50 %).
+- **Ítems de inicio**, si activas «Abrir al iniciar sesión» — vía `SMAppService`, que
+  no muestra ningún diálogo.
+
+```bash
+ClaudePet.app/Contents/MacOS/ClaudePet --dump   # lista los permisos y su estado
+```
+
 ## Extras
 
 ```bash
-./start-at-login.sh        # arranca sola al iniciar sesión
+./start-at-login.sh        # arranca sola al iniciar sesión (--off para quitarlo)
+./package.sh               # .zip de ~200 KB para compartir
 ./install-statusline.sh    # datos más frescos vía hook de statusLine (opcional)
 ./uninstall-statusline.sh  # revertir lo anterior
 ./ClaudePet.app/Contents/MacOS/ClaudePet --dump   # diagnóstico por consola
