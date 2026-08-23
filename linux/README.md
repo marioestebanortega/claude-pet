@@ -90,6 +90,15 @@ python3 -m claudepet --pet-png /tmp/pet.png --night
 Usa `cairo.ImageSurface`, así que no necesita pantalla, y sale con el mismo encuadre
 que `docs/mascota-flotante.png` para poder compararlos píxel a píxel.
 
+## Varias sesiones de Claude Code a la vez
+
+Todas escriben el mismo `~/.claude/pet-usage.json`, y una sesión quieta reescribe sus
+cifras viejas con marca de tiempo nueva: la mascota acaba enseñando un número que no
+coincide con `/usage`. La mitad del arreglo ya está aquí — `usage.py` descarta ventanas
+cuyo `resets_at` quedó atrás. La otra mitad vive en el hook, que **todavía no se
+distribuye en el `.deb`**: el encargo completo está en
+[`docs/sesiones-simultaneas-ubuntu.md`](../docs/sesiones-simultaneas-ubuntu.md).
+
 ## Construir el paquete
 
 ```bash
