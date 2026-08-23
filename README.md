@@ -20,20 +20,38 @@ Lee los datos de un **caché local** que Claude Code ya escribe en tu Mac:
 La app usa siempre la fuente **más reciente** de las dos gratuitas, con un
 *file watcher* que reacciona al instante cuando el archivo cambia.
 
-### Frescura del dato
+### Frescura del dato — instala el hook
 
-`~/.claude.json` **solo se reescribe cuando Claude Code consulta al servidor**. Entre
-consulta y consulta el archivo se queda quieto, así que los números pueden estar viejos
-sin que nada haya fallado — es la causa más probable de ver un porcentaje que no coincide
-con `/usage`.
+**Medido en esta máquina: `~/.claude.json` se refrescó una sola vez en 22 minutos**, y eso
+con Claude Code abierto y en uso. Como fuente única no basta.
 
-Por eso pasados **15 minutos** la app lo dice sin ambigüedad:
+La solución es el hook de `statusLine`, y es gratis: Claude Code se lo pasa a un script
+local que corre en tu máquina, sin tokens ni red. `./install-statusline.sh` lo deja
+configurado así:
+
+```json
+{ "type": "command", "command": "python3 ~/.claude/statusline-pet.py",
+  "refreshInterval": 10, "padding": 1 }
+```
+
+`refreshInterval` es la clave. Sin él, [la línea de estado solo se re-ejecuta tras cada
+mensaje del asistente](https://code.claude.com/docs/es/statusline#how-status-lines-work),
+así que si dejas Claude Code quieto el dato se congela igual. Con él corre también en
+temporizador. Verificado: el archivo se reescribe cada ~10 s y la app lo lee al instante.
+
+### Cuándo avisa de dato viejo
+
+Sin el hook, los números pueden quedarse viejos sin que nada haya fallado — es la causa
+más probable de ver un porcentaje que no coincide con `/usage`. Pasados **15 minutos** la
+app lo dice sin ambigüedad:
 
 - el badge de la mascota se pone gris con un ⏱, en vez del color del humor
 - el panel marca la antigüedad en naranja y sugiere instalar el hook
 
-Con el hook de `statusLine` instalado esto deja de pasar: se refresca en cada render de
-la barra de estado, o sea constantemente mientras usas Claude Code.
+Pero solo avisa **si Claude Code está corriendo**. Con Claude Code cerrado tu cuota no se
+mueve, así que un dato de hace horas sigue siendo correcto y el aviso sería puro ruido.
+Se detecta por el `mtime` de los dos archivos, que es un `stat` — sin lanzar procesos ni
+pedir permisos.
 
 ## Uso
 

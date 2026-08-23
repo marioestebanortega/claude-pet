@@ -279,6 +279,28 @@ enum LocalUsage {
         return u.limits.isEmpty ? nil : u
     }
 
+    /// ¿Claude Code está corriendo ahora?
+    ///
+    /// Se deduce del mtime de los dos archivos: Claude Code reescribe
+    /// `~/.claude.json` continuamente mientras corre, y con el hook instalado
+    /// `pet-usage.json` se refresca cada pocos segundos. Es un `stat`, sin
+    /// lanzar procesos ni pedir permisos.
+    ///
+    /// Importa porque si Claude Code está cerrado, tu consumo no está
+    /// cambiando: un dato de hace horas sigue siendo correcto y avisar de
+    /// que está "viejo" sería ruido.
+    static func claudeCodeActive(within: TimeInterval = 3 * 60) -> Bool {
+        let fm = FileManager.default
+        for url in [statusLineJSON, claudeJSON] {
+            if let attrs = try? fm.attributesOfItem(atPath: url.path),
+               let m = attrs[.modificationDate] as? Date,
+               Date().timeIntervalSince(m) < within {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Combina ambas fuentes y devuelve la más reciente.
     static func best() -> Usage? {
         let a = fromClaudeJSON(), b = fromStatusLine()
@@ -477,6 +499,11 @@ final class PetStore: ObservableObject {
     @Published private(set) var bubble: String?
     @Published private(set) var tick = Date()   // para refrescar los "hace X min"
     @Published private(set) var activity: Activity = .idle
+    @Published private(set) var claudeActive = false
+
+    /// Solo hay motivo para desconfiar del dato si Claude Code está corriendo:
+    /// con Claude Code cerrado la cuota no se mueve.
+    var dataLooksStale: Bool { (usage?.isStale ?? false) && claudeActive }
 
     @Published var petVisible: Bool {
         didSet {
@@ -639,6 +666,7 @@ final class PetStore: ObservableObject {
     /// Lectura local: instantánea y sin costo.
     func reload(announce: Bool = false) {
         tick = Date()
+        claudeActive = LocalUsage.claudeCodeActive()
         guard let fresh = LocalUsage.best() else {
             if usage == nil {
                 errorMsg = "Aún no hay datos locales. Abre Claude Code una vez y aparecerán."
@@ -1281,13 +1309,13 @@ struct PanelView: View {
 
                 // Frescura del dato — clave, porque el caché solo se actualiza al usar Claude Code.
                 HStack(spacing: 5) {
-                    Image(systemName: u.isStale ? "clock.badge.exclamationmark" : "clock")
+                    Image(systemName: store.dataLooksStale ? "clock.badge.exclamationmark" : "clock")
                     Text("dato de \(Fmt.ago(u.fetchedAt))")
                     Text("·").foregroundStyle(.tertiary)
                     Text(u.source).foregroundStyle(.tertiary)
                 }
                 .font(.system(size: 9))
-                .foregroundStyle(u.isStale ? Mood.alert.textColor : .secondary)
+                .foregroundStyle(store.dataLooksStale ? Mood.alert.textColor : .secondary)
                 .id(store.tick)
             }
 
@@ -1332,7 +1360,7 @@ struct PanelView: View {
             }
             .toggleStyle(.switch).controlSize(.mini).font(.system(size: 11))
 
-            if let u = store.usage, u.isStale, u.source != "statusLine" {
+            if store.dataLooksStale, store.usage?.source != "statusLine" {
                 Label("El caché solo se refresca cuando usas Claude Code. Para datos al "
                       + "instante instala el hook: ./install-statusline.sh",
                       systemImage: "bolt.badge.clock")
@@ -1377,7 +1405,7 @@ struct DesktopPetView: View {
     @ObservedObject var store = PetStore.shared
     @State private var hovering = false
 
-    private var stale: Bool { store.usage?.isStale ?? false }
+    private var stale: Bool { store.dataLooksStale }
 
     private var hoverText: String {
         guard let u = store.usage else { return "Sin datos todavía" }
@@ -1385,7 +1413,7 @@ struct DesktopPetView: View {
             .map { "\($0.label.hasPrefix("Sesión") ? "Sesión" : "Semana") \($0.percent)%" }
         let age = "\(Fmt.ago(u.fetchedAt))"
         return parts.joined(separator: " · ") + "\n"
-             + (u.isStale ? "⚠︎ dato de \(age), puede estar viejo" : age)
+             + (store.dataLooksStale ? "⚠︎ dato de \(age), puede estar viejo" : age)
     }
 
     var body: some View {
