@@ -32,6 +32,12 @@ struct Usage: Equatable {
 
     /// Qué tan viejo es el dato.
     var age: TimeInterval { Date().timeIntervalSince(fetchedAt) }
+
+    /// El caché solo se reescribe cuando Claude Code consulta al servidor, así que
+    /// puede quedarse viejo sin que nada falle. Pasado este punto hay que avisarlo:
+    /// los números que se ven ya no son los de verdad.
+    static let staleAfter: TimeInterval = 15 * 60
+    var isStale: Bool { age > Self.staleAfter }
 }
 
 /// Lo que Clawd está haciendo ahora mismo. En reposo solo flota y parpadea.
@@ -1156,13 +1162,13 @@ struct PanelView: View {
 
                 // Frescura del dato — clave, porque el caché solo se actualiza al usar Claude Code.
                 HStack(spacing: 5) {
-                    Image(systemName: u.age > 3600 ? "clock.badge.exclamationmark" : "clock")
+                    Image(systemName: u.isStale ? "clock.badge.exclamationmark" : "clock")
                     Text("dato de \(Fmt.ago(u.fetchedAt))")
                     Text("·").foregroundStyle(.tertiary)
                     Text(u.source).foregroundStyle(.tertiary)
                 }
                 .font(.system(size: 9))
-                .foregroundStyle(u.age > 3600 ? .orange : .secondary)
+                .foregroundStyle(u.isStale ? Mood.alert.textColor : .secondary)
                 .id(store.tick)
             }
 
@@ -1196,9 +1202,18 @@ struct PanelView: View {
             }
             .toggleStyle(.switch).controlSize(.mini).font(.system(size: 11))
 
-            Label("Leer el archivo local no consume nada de tu cuota.",
-                  systemImage: "leaf.fill")
-                .font(.system(size: 9)).foregroundStyle(Mood.chill.textColor)
+            if let u = store.usage, u.isStale, u.source != "statusLine" {
+                Label("El caché solo se refresca cuando usas Claude Code. Para datos al "
+                      + "instante instala el hook: ./install-statusline.sh",
+                      systemImage: "bolt.badge.clock")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Mood.alert.textColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label("Leer el archivo local no consume nada de tu cuota.",
+                      systemImage: "leaf.fill")
+                    .font(.system(size: 9)).foregroundStyle(Mood.chill.textColor)
+            }
 
             Divider()
 
@@ -1232,11 +1247,15 @@ struct DesktopPetView: View {
     @ObservedObject var store = PetStore.shared
     @State private var hovering = false
 
+    private var stale: Bool { store.usage?.isStale ?? false }
+
     private var hoverText: String {
         guard let u = store.usage else { return "Sin datos todavía" }
         let parts = [u.session, u.weekly].compactMap { $0 }
             .map { "\($0.label.hasPrefix("Sesión") ? "Sesión" : "Semana") \($0.percent)%" }
-        return parts.joined(separator: " · ") + "\n\(Fmt.ago(u.fetchedAt))"
+        let age = "\(Fmt.ago(u.fetchedAt))"
+        return parts.joined(separator: " · ") + "\n"
+             + (u.isStale ? "⚠︎ dato de \(age), puede estar viejo" : age)
     }
 
     var body: some View {
@@ -1257,17 +1276,23 @@ struct DesktopPetView: View {
                 .onTapGesture { store.reload(announce: true) }
                 .help("Clic: releer · Arrastra para mover")
 
-            Text("\(store.usage?.sessionPct ?? 0)/\(store.usage?.weekPct ?? 0)%")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8).padding(.vertical, 2.5)
-                .background(
-                    Capsule()
-                        .fill(store.mood.deep)
-                        .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.5))
-                )
-                .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
-                .offset(y: -2)
+            HStack(spacing: 3) {
+                if stale {
+                    Image(systemName: "clock.badge.exclamationmark")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                Text("\(store.usage?.sessionPct ?? 0)/\(store.usage?.weekPct ?? 0)%")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8).padding(.vertical, 2.5)
+            .background(
+                Capsule()
+                    .fill(stale ? Mood.broken.deep : store.mood.deep)
+                    .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.5))
+            )
+            .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
+            .offset(y: -2)
         }
         .padding(.horizontal, 6)
         .padding(.bottom, 4)

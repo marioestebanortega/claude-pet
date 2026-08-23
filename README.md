@@ -20,8 +20,20 @@ Lee los datos de un **caché local** que Claude Code ya escribe en tu Mac:
 La app usa siempre la fuente **más reciente** de las dos gratuitas, con un
 *file watcher* que reacciona al instante cuando el archivo cambia.
 
-Como el caché solo se refresca mientras Claude Code corre, el panel muestra
-la antigüedad del dato («dato de hace 16 min») y la marca en naranja si pasa de una hora.
+### Frescura del dato
+
+`~/.claude.json` **solo se reescribe cuando Claude Code consulta al servidor**. Entre
+consulta y consulta el archivo se queda quieto, así que los números pueden estar viejos
+sin que nada haya fallado — es la causa más probable de ver un porcentaje que no coincide
+con `/usage`.
+
+Por eso pasados **15 minutos** la app lo dice sin ambigüedad:
+
+- el badge de la mascota se pone gris con un ⏱, en vez del color del humor
+- el panel marca la antigüedad en naranja y sugiere instalar el hook
+
+Con el hook de `statusLine` instalado esto deja de pasar: se refresca en cada render de
+la barra de estado, o sea constantemente mientras usas Claude Code.
 
 ## Uso
 
