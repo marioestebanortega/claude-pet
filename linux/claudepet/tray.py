@@ -13,7 +13,7 @@ import tempfile
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gtk  # noqa: E402
+from gi.repository import Gtk  # noqa: E402
 
 # Ubuntu moderno trae la variante Ayatana; el nombre viejo sigue en otras distros.
 Indicator = None
@@ -27,20 +27,21 @@ for name, version in (("AyatanaAppIndicator3", "0.1"), ("AppIndicator3", "0.1"))
 
 from . import sprite, usage  # noqa: E402
 
-POLL_SECONDS = 5
 APP_ID = "claudepet"
 
 
 class Tray:
-    def __init__(self) -> None:
+    def __init__(self, hub, pet=None, on_quit=None) -> None:
         if Indicator is None:
             raise RuntimeError(
                 "Falta el soporte de indicadores de bandeja.\n"
                 "  sudo apt install gir1.2-ayatanaappindicator3-0.1"
             )
+        self.hub = hub
+        self.pet = pet
+        self.on_quit = on_quit
         self._dir = tempfile.mkdtemp(prefix="claudepet-")
         self._icon_key: tuple | None = None
-        self._stamps: tuple | None = None
         self.data: usage.Usage | None = None
 
         self.menu = Gtk.Menu()
@@ -53,8 +54,7 @@ class Tray:
         self.ind.set_status(Indicator.IndicatorStatus.ACTIVE)
         self.ind.set_menu(self.menu)
 
-        self.refresh(force=True)
-        GLib.timeout_add_seconds(POLL_SECONDS, self._tick)
+        hub.subscribe(self._on_data)
 
     # ── Icono ────────────────────────────────────────────────
     def _icon_path(self, color: int = sprite.BRAND, night: bool = False) -> str:
@@ -81,14 +81,20 @@ class Tray:
         self.freshness.set_sensitive(False)
         self.menu.append(self.freshness)
 
+        if self.pet is not None:
+            self.pet_item = Gtk.CheckMenuItem(label="Mascota en el escritorio")
+            self.pet_item.set_active(self.pet.get_visible())
+            self.pet_item.connect("toggled", self._toggle_pet)
+            self.menu.append(self.pet_item)
+
         refresh = Gtk.MenuItem(label="Actualizar ahora")
-        refresh.connect("activate", lambda *_: self.refresh(force=True))
+        refresh.connect("activate", lambda *_: self.hub.refresh(force=True))
         self.menu.append(refresh)
 
         self.menu.append(Gtk.SeparatorMenuItem())
 
         quit_item = Gtk.MenuItem(label="Salir de Claude Pet")
-        quit_item.connect("activate", lambda *_: Gtk.main_quit())
+        quit_item.connect("activate", lambda *_: (self.on_quit or Gtk.main_quit)())
         self.menu.append(quit_item)
 
         self.menu.show_all()
@@ -96,21 +102,12 @@ class Tray:
             item.hide()
 
     # ── Refresco ─────────────────────────────────────────────
-    def _tick(self) -> bool:
-        self.refresh()
-        return True                                # seguir llamando
-
-    def refresh(self, force: bool = False) -> None:
-        stamps = tuple(
-            os.path.getmtime(p) if os.path.exists(p) else None
-            for p in (usage.CLAUDE_JSON, usage.STATUSLINE_JSON)
-        )
-        if not force and stamps == self._stamps and self.data is not None:
+    def _on_data(self, data, changed: bool) -> None:
+        self.data = data
+        if changed:
+            self._render()
+        else:
             self._render_freshness()               # solo envejece el texto
-            return
-        self._stamps = stamps
-        self.data = usage.best()
-        self._render()
 
     def _render(self) -> None:
         data = self.data
@@ -149,6 +146,22 @@ class Tray:
             f"{mark}dato de hace {_ago(self.data.age)} · {self.data.source}"
         )
 
+    def _toggle_pet(self, item) -> None:
+        if item.get_active():
+            self.pet.show_pet()
+        else:
+            self.pet.hide_pet()
+
+    def sync_pet_item(self) -> None:
+        """La mascota también se esconde desde su propio menú."""
+        if self.pet is None:
+            return
+        want = self.pet.get_visible()
+        if self.pet_item.get_active() != want:
+            self.pet_item.handler_block_by_func(self._toggle_pet)
+            self.pet_item.set_active(want)
+            self.pet_item.handler_unblock_by_func(self._toggle_pet)
+
     def _show_rows(self, rows: list[str]) -> None:
         for item, text in zip(self.items, rows):
             item.set_label(text)
@@ -172,9 +185,3 @@ def _is_night() -> bool:
     import datetime
     hour = datetime.datetime.now().hour
     return hour >= 18 or hour < 6
-
-
-def main() -> int:
-    Tray()
-    Gtk.main()
-    return 0

@@ -49,6 +49,19 @@ def _icon(args: list[str]) -> int:
     return 0
 
 
+def _pet_png(args: list[str]) -> int:
+    """Vuelca la mascota a PNG sin necesitar pantalla, para poder compararla
+    con docs/mascota-flotante.png."""
+    from . import pet, usage
+    path = next((a for a in args if not a.startswith("--")), "pet.png")
+    pet.write_png(path, usage.best(), "--night" in args,
+                  stale=False, scale=int(next(
+                      (a.split("=")[1] for a in args if a.startswith("--scale=")),
+                      pet.REF_SCALE)))
+    print("escrito", path)
+    return 0
+
+
 def _autostart(args: list[str]) -> int:
     """Equivalente a SMAppService en macOS: una entrada .desktop en autostart."""
     import os
@@ -86,22 +99,28 @@ def main() -> int:
         return _autostart(args)
     if "--icon" in args:
         return _icon([a for a in args if a != "--icon"])
+    if "--pet-png" in args:
+        return _pet_png([a for a in args if a != "--pet-png"])
     if "--help" in args or "-h" in args:
         print(__doc__)
         print("  --dump              muestra el consumo y sale (no necesita GTK)")
         print("  --icon [ruta]       escribe el PNG de Clawd  [--night] [--tint]")
         print("  --autostart [off]   arrancar al iniciar sesión")
-        print("  sin argumentos      arranca el applet de bandeja")
+        print("  --pet               solo la mascota flotante, sin bandeja")
+        print("  --no-pet            solo la bandeja, sin mascota")
+        print("  --pet-png [ruta]    vuelca la mascota a PNG  [--night] [--scale=N]")
+        print("  sin argumentos      bandeja + mascota, según el estado guardado")
         return 0
 
     try:
-        from .tray import main as tray_main
+        from .app import run
     except Exception as exc:                        # GTK ausente o roto
         print(f"No pude arrancar el applet: {exc}", file=sys.stderr)
         print("\nPrueba primero que la lectura funciona:", file=sys.stderr)
         print("  claudepet --dump", file=sys.stderr)
         return 1
-    return tray_main()
+    return run(show_tray="--pet" not in args,
+               show_pet=False if "--no-pet" in args else (True if "--pet" in args else None))
 
 
 if __name__ == "__main__":

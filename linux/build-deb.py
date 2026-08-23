@@ -15,7 +15,7 @@ import tarfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "1.0"
+VERSION = "1.1"
 PKG = "claudepet"
 
 CONTROL = f"""Package: {PKG}
@@ -23,7 +23,7 @@ Version: {VERSION}
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.9), python3-gi, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1
+Depends: python3 (>= 3.9), python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1
 Maintainer: Mario Ortega <maes0186@gmail.com>
 Description: Mascota que vigila tu consumo de Claude Code
  Applet de bandeja que muestra cuanta cuota de Claude Code llevas gastada,
@@ -33,6 +33,9 @@ Description: Mascota que vigila tu consumo de Claude Code
  Soporta tanto los planes por ventanas de tiempo (Pro, Max) como los
  medidos en dinero (Team, Enterprise), incluidos el gasto y los creditos
  mensuales.
+ .
+ Incluye ademas la mascota flotante: una ventana sin marco, siempre encima
+ del escritorio, con los anillos de consumo y Clawd dentro.
 """
 
 LAUNCHER = """#!/bin/sh
