@@ -44,7 +44,19 @@ pet-usage.json
 scratch/
 
 # Paquetes generados para compartir
-ClaudePet-*.zip
+/ClaudePet-*.zip
 
 # Paquetes de Linux generados
-linux/*.deb
+/linux/*.deb
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ── dist/ SÍ se versiona ──────────────────────────────────────
+# Son artefactos regenerables, pero mientras no haya una página de
+# releases es la forma de que un `git clone` traiga algo ejecutable.
+!dist/

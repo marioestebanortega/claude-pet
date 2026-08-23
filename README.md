@@ -59,6 +59,19 @@ mueve, así que un dato de hace horas sigue siendo correcto y el aviso sería pu
 Se detecta por el `mtime` de los dos archivos, que es un `stat` — sin lanzar procesos ni
 pedir permisos.
 
+## Descargar
+
+Los ejecutables van versionados en [`dist/`](dist/), así que un `git clone` ya
+trae algo que correr:
+
+| Archivo | Para |
+|---|---|
+| `dist/ClaudePet-1.0.zip` | macOS — descomprimir y `bash install.sh` |
+| `dist/claudepet_1.0_all.deb` | Ubuntu — `sudo apt install ./claudepet_1.0_all.deb` |
+
+Son artefactos regenerables (`./package.sh` y `python3 linux/build-deb.py`); se
+versionan solo porque no hay una página de releases donde colgarlos.
+
 ## Uso
 
 ```bash

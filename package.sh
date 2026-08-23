@@ -11,7 +11,8 @@ cd "$(dirname "$0")"
 ./build.sh
 
 VERSION=$(plutil -extract CFBundleShortVersionString raw ClaudePet.app/Contents/Info.plist)
-OUT="ClaudePet-$VERSION.zip"
+mkdir -p dist
+OUT="dist/ClaudePet-$VERSION.zip"
 
 rm -f "$OUT"
 # Se empaquetan juntos la app y el instalador: sin el instalador, a quien la

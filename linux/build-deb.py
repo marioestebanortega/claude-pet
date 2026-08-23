@@ -81,7 +81,7 @@ def tar_gz(entries: list[tuple[str, bytes, int]], mtime: int) -> bytes:
     return buf.getvalue()
 
 
-def build(out_dir: str = HERE) -> str:
+def build(out_dir: str = os.path.join(os.path.dirname(HERE), "dist")) -> str:
     sys.path.insert(0, HERE)
     from claudepet import sprite
 
@@ -105,6 +105,7 @@ def build(out_dir: str = HERE) -> str:
     control_tar = tar_gz([("control", CONTROL.encode(), 0o644)], mtime)
     data_tar = tar_gz(data, mtime)
 
+    os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"{PKG}_{VERSION}_all.deb")
     with open(out, "wb") as f:
         f.write(b"!<arch>\n")
