@@ -98,6 +98,36 @@ Clawd conserva su naranja de marca (`#D97757`) siempre; el color del humor va en
 anillo. Si prefieres que él también cambie de color, actívalo en
 **«Clawd cambia de color con el humor»**.
 
+### Planes que no se miden en porcentaje
+
+Pro y Max se miden en ventanas de tiempo (5 h y 7 días). **Team y Enterprise se miden
+en dinero**, y esas cifras viven en sitios distintos del mismo archivo:
+
+| Dimensión | Dónde vive | Qué muestra |
+|---|---|---|
+| Ventanas de tiempo | `limits[]` | sesión, semana, y las que traiga el plan (`monthly`, `daily`…) |
+| Dinero por ventana | `five_hour.used_dollars` / `limit_dollars` | «US$ 310 de US$ 500» junto al % |
+| Gasto | `utilization.spend` | importe y tope, en la moneda de la cuenta |
+| Créditos del mes | `utilization.extra_usage` | tope mensual, con sub-ventanas diaria y semanal |
+
+La app **dibuja todo lo que encuentre**, no una lista fija: si un plan trae un `kind`
+que no conoce, lo enseña con la etiqueta legible en vez de descartarlo. Y el humor de
+Clawd se calcula sobre **la peor de todas** las dimensiones, no solo sesión y semana.
+
+Ojo con una consecuencia: el hook de `statusLine` solo entrega `five_hour` y
+`seven_day`. Por eso las fuentes no se eligen, **se fusionan**: las cifras frescas
+salen del hook y las dimensiones ricas de `~/.claude.json`.
+
+Si tu sesión no usa una suscripción de Claude.ai (API key, Bedrock, Vertex), no hay
+ventanas de límite que publicar — se factura por uso. La app lo dice en vez de dejarte
+esperando datos que no van a llegar.
+
+Para probar con datos de otro plan sin tocar los tuyos:
+
+```bash
+CLAUDEPET_JSON=/ruta/a/otro.json CLAUDEPET_STATUSLINE_JSON=/nope   ClaudePet.app/Contents/MacOS/ClaudePet --dump
+```
+
 ### Doble anillo
 
 La mascota lleva dos anillos concéntricos, no uno:

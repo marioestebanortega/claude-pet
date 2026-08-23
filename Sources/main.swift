@@ -9,12 +9,14 @@ import ServiceManagement
 // ─────────────────────────────────────────────────────────────
 
 struct Limit: Identifiable, Equatable {
-    let id: String        // "session", "weekly_all", "weekly_scoped:Fable"
+    let id: String        // "session", "weekly_all", "weekly_scoped:Fable", "spend"…
     let label: String
     let percent: Int
     let resetsAt: Date?
     let isActive: Bool
-    let group: String     // "session" | "weekly"
+    let group: String     // "session" | "weekly" | "monthly" | "spend"
+    /// Para planes medidos en dinero (Team/Enterprise) o créditos: "12,40 $ de 50 $".
+    var detail: String? = nil
 }
 
 struct Usage: Equatable {
@@ -24,7 +26,16 @@ struct Usage: Equatable {
 
     var session: Limit?  { limits.first { $0.id == "session" } }
     var weekly: Limit?   { limits.first { $0.id == "weekly_all" } }
-    var scoped: [Limit]  { limits.filter { $0.id.hasPrefix("weekly_scoped") && $0.percent > 0 } }
+
+    /// Todo lo demás que traiga el plan: modelos concretos, gasto en dólares,
+    /// créditos mensuales, o dimensiones que aún no existían al escribir esto.
+    /// Se ocultan las que están a cero y sin cifra, que solo serían ruido.
+    var others: [Limit] {
+        limits.filter { l in
+            l.id != "session" && l.id != "weekly_all"
+                && (l.percent > 0 || l.detail != nil || l.isActive)
+        }
+    }
 
     var sessionPct: Int { session?.percent ?? 0 }
     var weekPct: Int { weekly?.percent ?? 0 }
@@ -171,12 +182,20 @@ enum Mood: Int {
 // ─────────────────────────────────────────────────────────────
 
 enum LocalUsage {
+    /// Se puede redirigir con CLAUDEPET_JSON, para probar con datos de otro
+    /// tipo de plan o para instalaciones con el home en otro sitio.
     static var claudeJSON: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
+        if let p = ProcessInfo.processInfo.environment["CLAUDEPET_JSON"], !p.isEmpty {
+            return URL(fileURLWithPath: (p as NSString).expandingTildeInPath)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
     }
     /// Archivo que escribe el hook opcional de statusLine.
     static var statusLineJSON: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let p = ProcessInfo.processInfo.environment["CLAUDEPET_STATUSLINE_JSON"], !p.isEmpty {
+            return URL(fileURLWithPath: (p as NSString).expandingTildeInPath)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/pet-usage.json")
     }
 
@@ -194,14 +213,37 @@ enum LocalUsage {
         return f.date(from: s)
     }
 
+    /// Formatea un importe. `amount_minor` viene en la unidad menor de la
+    /// moneda (céntimos), con su propio exponente: 1250 con exponente 2 = 12,50.
+    private static func money(_ value: Double, _ currency: String?) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = currency ?? "USD"
+        f.maximumFractionDigits = value >= 100 ? 0 : 2
+        return f.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+    }
+
+    private static func minor(_ d: [String: Any]?) -> Double? {
+        guard let d, let amount = d["amount_minor"] as? Double else { return nil }
+        let exp = (d["exponent"] as? Double) ?? 2
+        return amount / pow(10, exp)
+    }
+
     private static func label(kind: String, scope: [String: Any]?) -> String {
         switch kind {
         case "session":     return "Sesión (5 h)"
         case "weekly_all":  return "Semana (todos los modelos)"
+        case "monthly":     return "Mes"
+        case "daily":       return "Día"
+        case "spend":       return "Gasto"
         case "weekly_scoped":
             let model = (scope?["model"] as? [String: Any])?["display_name"] as? String
-            return "Semana (\(model ?? "modelo"))"
-        default:            return kind
+            let surface = (scope?["surface"] as? [String: Any])?["display_name"] as? String
+            return "Semana (\(model ?? surface ?? "acotado"))"
+        default:
+            // Un plan puede traer dimensiones que aún no existían: mejor
+            // enseñarlas legibles que tirarlas a la basura.
+            return kind.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
 
@@ -234,7 +276,8 @@ enum LocalUsage {
                     percent: Int((l["percent"] as? Double) ?? 0),
                     resetsAt: date(l["resets_at"]),
                     isActive: (l["is_active"] as? Bool) ?? false,
-                    group: l["group"] as? String ?? kind
+                    group: l["group"] as? String ?? kind,
+                    detail: dollarDetail(util[kindKey(kind)] as? [String: Any])
                 ))
             }
         } else {
@@ -249,7 +292,80 @@ enum LocalUsage {
                                       group: key == "five_hour" ? "session" : "weekly"))
             }
         }
+        // Dimensiones que no viven en `limits[]` y que son justo las que
+        // usan los planes de empresa: gasto en dinero y créditos mensuales.
+        u.limits.append(contentsOf: spendLimits(util))
+
         return u.limits.isEmpty ? nil : u
+    }
+
+    /// El objeto `utilization` guarda las cifras en dólares aparte de `limits[]`.
+    private static func kindKey(_ kind: String) -> String {
+        switch kind {
+        case "session":    return "five_hour"
+        case "weekly_all": return "seven_day"
+        default:           return kind
+        }
+    }
+
+    /// "12,40 $ de 50 $" cuando el plan se mide en dinero en vez de en porcentaje.
+    private static func dollarDetail(_ d: [String: Any]?) -> String? {
+        guard let d,
+              let used = d["used_dollars"] as? Double,
+              let limit = d["limit_dollars"] as? Double, limit > 0
+        else { return nil }
+        return "\(money(used, "USD")) de \(money(limit, "USD"))"
+    }
+
+    /// Gasto en dinero (`spend`) y créditos mensuales (`extra_usage`).
+    /// En una suscripción Pro/Max vienen vacíos y no se dibuja nada; en Team y
+    /// Enterprise son la métrica que de verdad importa.
+    private static func spendLimits(_ util: [String: Any]) -> [Limit] {
+        var out: [Limit] = []
+
+        if let sp = util["spend"] as? [String: Any] {
+            let used = minor(sp["used"] as? [String: Any])
+            let cap = minor(sp["limit"] as? [String: Any]) ?? minor(sp["cap"] as? [String: Any])
+            let pct = Int((sp["percent"] as? Double) ?? 0)
+            let currency = (sp["used"] as? [String: Any])?["currency"] as? String
+            if cap != nil || pct > 0 || (used ?? 0) > 0 {
+                var text: String? = nil
+                if let used, let cap { text = "\(money(used, currency)) de \(money(cap, currency))" }
+                else if let used, used > 0 { text = money(used, currency) }
+                out.append(Limit(id: "spend", label: "Gasto", percent: pct,
+                                 resetsAt: nil, isActive: (sp["enabled"] as? Bool) ?? false,
+                                 group: "spend", detail: text))
+            }
+        }
+
+        if let ex = util["extra_usage"] as? [String: Any],
+           (ex["is_enabled"] as? Bool) == true {
+            let cur = ex["currency"] as? String
+            let used = ex["used_credits"] as? Double
+            let cap = ex["monthly_limit"] as? Double
+            var text: String? = nil
+            if let used, let cap { text = "\(money(used, cur)) de \(money(cap, cur))" }
+            out.append(Limit(id: "extra_usage",
+                             label: "Créditos del mes",
+                             percent: Int((ex["utilization"] as? Double) ?? 0),
+                             resetsAt: nil,
+                             isActive: (ex["spend_limit_reached"] as? Bool) != true,
+                             group: "monthly", detail: text))
+
+            // El límite mensual puede llevar sub-ventanas diaria y semanal.
+            for (key, name) in [("daily", "Créditos del día"), ("weekly", "Créditos de la semana")] {
+                guard let sub = ex[key] as? [String: Any] else { continue }
+                let u = sub["used_credits"] as? Double
+                let c = sub["limit"] as? Double ?? sub["monthly_limit"] as? Double
+                var t: String? = nil
+                if let u, let c { t = "\(money(u, cur)) de \(money(c, cur))" }
+                out.append(Limit(id: "extra_\(key)", label: name,
+                                 percent: Int((sub["utilization"] as? Double) ?? 0),
+                                 resetsAt: date(sub["resets_at"]), isActive: false,
+                                 group: key == "daily" ? "daily" : "weekly", detail: t))
+            }
+        }
+        return out
     }
 
     /// Lee el archivo del hook de statusLine (formato `rate_limits`).
@@ -311,15 +427,55 @@ enum LocalUsage {
         return false
     }
 
-    /// Combina ambas fuentes y devuelve la más reciente.
-    static func best() -> Usage? {
-        let a = fromClaudeJSON(), b = fromStatusLine()
-        switch (a, b) {
-        case let (x?, y?): return x.fetchedAt >= y.fetchedAt ? x : y
-        case let (x?, nil): return x
-        case let (nil, y?): return y
-        default: return nil
+    /// Por qué no hay datos. Importa distinguir "aún no" de "nunca": a quien use
+    /// API key, Bedrock o Vertex no le van a aparecer jamás, y dejarlo esperando
+    /// sería mentirle.
+    static func emptyReason() -> String {
+        guard let data = try? Data(contentsOf: claudeJSON),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return "No encuentro ~/.claude.json. ¿Has usado Claude Code en este Mac?"
         }
+        if root["oauthAccount"] == nil {
+            return "Tu sesión no usa una suscripción de Claude.ai — parece API key, "
+                 + "Bedrock o Vertex. Esos planes se facturan por uso y no publican "
+                 + "ventanas de límite, así que no hay nada que vigilar."
+        }
+        if root["cachedUsageUtilization"] == nil {
+            return "Aún no hay cifras de cuota. Usa Claude Code un momento y aparecen."
+        }
+        return "Tu plan no expone ninguna ventana de límite."
+    }
+
+    /// Combina las dos fuentes.
+    ///
+    /// No basta con quedarse con la más reciente: `statusLine` es más fresco pero
+    /// solo trae sesión y semana, mientras que `~/.claude.json` trae además el
+    /// gasto en dinero y los créditos, que es lo que miden los planes de empresa.
+    /// Así que se toman las cifras frescas y se conservan las dimensiones ricas.
+    static func best() -> Usage? {
+        let rich = fromClaudeJSON()
+        let fresh = fromStatusLine()
+
+        guard let rich else { return fresh }
+        guard let fresh, fresh.fetchedAt > rich.fetchedAt else { return rich }
+
+        var out = rich
+        for f in fresh.limits {
+            if let i = out.limits.firstIndex(where: { $0.id == f.id }) {
+                let old = out.limits[i]
+                out.limits[i] = Limit(id: old.id, label: old.label,
+                                      percent: f.percent,
+                                      resetsAt: f.resetsAt ?? old.resetsAt,
+                                      isActive: old.isActive, group: old.group,
+                                      detail: old.detail)
+            } else {
+                out.limits.append(f)
+            }
+        }
+        out.fetchedAt = fresh.fetchedAt
+        out.source = "statusLine + ~/.claude.json"
+        return out
     }
 }
 
@@ -697,9 +853,7 @@ final class PetStore: ObservableObject {
         lastStamps = stamps
 
         guard let fresh = LocalUsage.best() else {
-            if usage == nil {
-                errorMsg = "Aún no hay datos locales. Abre Claude Code una vez y aparecerán."
-            }
+            if usage == nil { errorMsg = LocalUsage.emptyReason() }
             return
         }
         errorMsg = nil
@@ -821,6 +975,11 @@ struct UsageBar: View {
                     Circle().fill(tint).frame(width: 5, height: 5)
                 }
                 Spacer()
+                if let detail = limit.detail {
+                    Text(detail)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
                 Text("\(limit.percent)%")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(mood.textColor)
@@ -1350,7 +1509,7 @@ struct PanelView: View {
                 VStack(spacing: 11) {
                     if let s = u.session { UsageBar(limit: s) }
                     if let w = u.weekly  { UsageBar(limit: w) }
-                    ForEach(u.scoped) { UsageBar(limit: $0) }
+                    ForEach(u.others) { UsageBar(limit: $0) }
                 }
 
                 // Frescura del dato — clave, porque el caché solo se actualiza al usar Claude Code.
@@ -1630,14 +1789,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let u = LocalUsage.best() {
             print("fuente elegida:", u.source, "|", Fmt.ago(u.fetchedAt))
             for l in u.limits {
-                print(String(format: "  %-32@ %3d%%  activo=%@  reinicio=%@",
+                print(String(format: "  %-26@ %3d%%  %-20@ %@",
                              l.label as NSString, l.percent,
-                             l.isActive ? "sí" : "no",
+                             (l.detail ?? "") as NSString,
                              Fmt.reset(l.resetsAt) as NSString))
             }
             print("peor =", u.worst, "→ humor", Mood.from(u.worst).face)
         } else {
-            print("SIN DATOS")
+            print("SIN DATOS →", LocalUsage.emptyReason())
         }
 
         print("")
