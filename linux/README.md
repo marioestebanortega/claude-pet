@@ -157,8 +157,32 @@ escribe a mano en vez de llamar a `dpkg-deb`.
 Porque moverse suave se paga a precio de reloj. En macOS, un vaivén interpolado de
 ±1,3 px costaba el 12 % de un núcleo todo el rato, y bajarlo a 15 fps no ayudaba: el
 suelo de cualquier movimiento continuo era ~4 %. Aquí ya se hace bien — `_breathe()`
-alterna dos posiciones cada 1,7 s y no interpola nada — pero conviene saber por qué,
-para no «mejorarlo»: [`docs/animacion-y-cpu-ubuntu.md`](../docs/animacion-y-cpu-ubuntu.md).
+alterna dos posiciones cada 1,7 s y no interpola nada.
+
+Medido en Ubuntu 26.04 (GNOME sobre Wayland, arm64), con `./medir-cpu.sh`, leyendo
+`utime + stime` de `/proc`. Tres muestras de 30 s por estado, alternando:
+
+| Estado | Proceso | `gnome-shell` |
+|---|---|---|
+| mascota en el escritorio | **0,07 %** | 0,9 % |
+| solo el applet de bandeja (`--no-pet`) | 0,07 % | 0,9 % |
+
+**El proceso cuesta lo mismo con la mascota que sin ella**, muy por debajo del 1 % que
+se esperaba. El redibujado cada 1,7 s no se nota.
+
+Del compositor solo se puede decir el límite, no la cifra: `gnome-shell` osciló entre
+0,6 % y 3,8 % **en los dos estados**, según lo que estuviera haciendo el resto del
+escritorio. Las medianas salen iguales (0,9 % contra 0,9 %), así que el coste que la
+mascota provoca fuera de su proceso queda **por debajo del ruido de la medición, unos
+±3 puntos**. Con este método no se puede afinar más: hay que medir con el escritorio
+quieto, sin una terminal repintándose al lado.
+
+La cadencia se queda en 1,7 s. En macOS quedó en 0,9 s, que respira más y también cuesta
+cero; cambiarla aquí obligaría a volver a medir y no hay motivo, porque ya está en el
+suelo.
+
+El porqué completo, con la tabla de macOS que descarta a los sospechosos caros:
+[`docs/animacion-y-cpu-ubuntu.md`](../docs/animacion-y-cpu-ubuntu.md).
 
 ## Qué comparte con la versión de macOS
 
