@@ -15,7 +15,7 @@ import tarfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "1.1"
+VERSION = "1.2"
 PKG = "claudepet"
 
 CONTROL = f"""Package: {PKG}
@@ -98,6 +98,12 @@ def build(out_dir: str = os.path.join(os.path.dirname(HERE), "dist")) -> str:
             continue
         with open(os.path.join(pkg_dir, name), "rb") as f:
             data.append((f"usr/lib/claudepet/claudepet/{name}", f.read(), 0o644))
+
+    # El hook de statusLine vive en la raíz del repo, fuera de linux/, así que
+    # no lo recoge el recorrido de arriba. Sin él, quien instale solo el .deb se
+    # queda con ~/.claude.json como única fuente, que se refresca muy poco.
+    with open(os.path.join(os.path.dirname(HERE), "statusline-pet.py"), "rb") as f:
+        data.append(("usr/lib/claudepet/statusline-pet.py", f.read(), 0o755))
 
     data.append(("usr/bin/claudepet", LAUNCHER.encode(), 0o755))
     data.append(("usr/share/applications/claudepet.desktop", DESKTOP.encode(), 0o644))

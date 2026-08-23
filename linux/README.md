@@ -13,7 +13,7 @@ exclusivos de Darwin.
 ## Instalar en Ubuntu
 
 ```bash
-sudo apt install ./claudepet_1.1_all.deb
+sudo apt install ./claudepet_1.2_all.deb
 claudepet &
 ```
 
@@ -27,6 +27,49 @@ Para que arranque al iniciar sesión:
 ```bash
 claudepet --autostart        # off para quitarlo
 ```
+
+## El dato fresco: el hook de `statusLine`
+
+Hay dos fuentes y la app las **fusiona**, pero solo una se refresca de verdad:
+
+| Fuente | Cada cuánto | Qué trae |
+|---|---|---|
+| `~/.claude.json` | muy de tarde en tarde — en la máquina de referencia, **una vez en 22 minutos** | todas las dimensiones, el gasto y los créditos de empresa |
+| `~/.claude/pet-usage.json` | cada 10 s, lo escribe el hook | solo sesión y semana, pero al día |
+
+Sin el hook la mascota va con lo que haya en `~/.claude.json`, que puede ser de hace
+media hora. Se pone con:
+
+```bash
+claudepet --install-statusline        # off para quitarlo
+```
+
+Copia el hook a `~/.claude/statusline-pet.py` y añade la entrada a
+`~/.claude/settings.json`, con copia de seguridad antes de tocarlo y avisando si ya
+tenías otro `statusLine` puesto (en ese caso `off` no te lo borra). Reinicia Claude
+Code después.
+
+### Varias sesiones de Claude Code a la vez
+
+**Todas las sesiones abiertas escriben el mismo `pet-usage.json`.** Una que lleve horas
+quieta sigue rindiendo su línea de estado cada pocos segundos: reescribe sus cifras de
+entonces con marca de tiempo de ahora. Sin más, la mascota rebota entre el dato bueno y
+el viejo, y lo que se ve es un número que no coincide con `/usage`.
+
+Se resuelve por los dos lados:
+
+- **Al escribir**, el hook funde en vez de sobrescribir, mirando `resets_at`, que
+  identifica la ventana: ventana posterior manda, ventana anterior se ignora, y dentro
+  de la misma ventana gana el porcentaje mayor, porque el consumo solo sube. El candado
+  es `flock` sobre un archivo aparte, `pet-usage.json.lock`, porque la escritura es
+  atómica y cambia de inodo en cada pasada.
+- **Al leer**, `usage.py` descarta las ventanas ya vencidas (`_drop_expired`), que es
+  justo la forma en que una foto vieja se delata.
+
+Queda un límite que no se puede tapar desde aquí: `written_at_ms` es la hora de
+escritura, no la del dato. Si **todas** las sesiones estuvieran quietas el archivo
+parecería fresco con cifras viejas, y en el payload no hay ninguna marca de cuándo el
+servidor las dio.
 
 ## Sin instalar nada
 
@@ -42,6 +85,7 @@ si esto muestra tus cifras, el problema es solo de interfaz.
   --dump              muestra el consumo y sale (no necesita GTK)
   --icon [ruta]       escribe el PNG de Clawd  [--night] [--tint]
   --autostart [off]   arrancar al iniciar sesión
+  --install-statusline [off]  pone el hook que da el dato fresco
   --pet               solo la mascota flotante, sin bandeja
   --no-pet            solo la bandeja, sin mascota
   --pet-png [ruta]    vuelca la mascota a PNG  [--night] [--scale=N]
