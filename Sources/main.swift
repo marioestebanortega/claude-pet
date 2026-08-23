@@ -44,12 +44,12 @@ struct Usage: Equatable {
 
 /// Lo que Clawd está haciendo ahora mismo. En reposo solo flota y parpadea.
 enum Activity: String {
-    case idle, coffee, yawn, dance, workout, nap, apple, laugh
+    case idle, coffee, yawn, dance, workout, nap, apple, smile
 
     var duration: Double {
         switch self {
         case .idle:    return 0
-        case .laugh:   return 2.6
+        case .smile:   return 2.8
         case .yawn:    return 3.5
         case .dance:   return 7
         case .workout: return 7
@@ -60,7 +60,7 @@ enum Activity: String {
     }
 
     /// De noche le da más por dormir y bostezar; de día, por el café y el baile.
-    /// `laugh` no entra en el sorteo: es una reacción al clic, no una ocurrencia.
+    /// `smile` no entra en el sorteo: es una reacción al clic, no una ocurrencia.
     static func random(night: Bool) -> Activity {
         var pool: [Activity] = [.coffee, .yawn, .dance, .workout, .apple, .nap]
         pool += night ? [.nap, .nap, .yawn] : [.coffee, .dance, .workout]
@@ -655,12 +655,12 @@ final class PetStore: ObservableObject {
         }
     }
 
-    /// Clic sobre Clawd: se ríe. De paso relee, que es gratis e instantáneo.
+    /// Clic sobre Clawd: sonríe. De paso relee, que es gratis e instantáneo.
     func poke() {
         reload(force: true)
-        say(["¡jaja!", "¡jeje!", "¡jiji!", "¡ay, para!", "¡me hace cosquillas!",
-             "¡ey!", "¡jajaja!"].randomElement() ?? "¡jaja!", seconds: 2.6)
-        startActivity(.laugh, forced: true)
+        say(["¡hola!", "¡ey!", "aquí sigo", "¿qué tal?", "todo bien por acá",
+             "me alegro de verte"].randomElement() ?? "¡hola!", seconds: 2.8)
+        startActivity(.smile, forced: true)
     }
 
     /// Lanza una actividad ahora. `forced` la dispara aunque estén desactivadas.
@@ -927,12 +927,22 @@ enum Clawd {
         case .open:   break
         case .closed: for c in eyeCols { g[2][c] = true }
         case .wide:   for c in eyeCols { g[1][c] = false }
+        case .happy:
+            // Ojos entornados: el hueco se ensancha hacia dentro. Se probó el
+            // chevron ^^, pero a 8 px se deshace en puntos sueltos, y llevarlo
+            // a las columnas del borde le muerde la silueta a la cabeza.
+            g[2][2] = false; g[2][3] = false
+            g[2][7] = false; g[2][8] = false
         }
 
         switch mouth {
         case 1: g[4][5] = false
         case 2: for c in 4...6 { g[4][c] = false }
         case 3: for c in 4...6 { g[4][c] = false; g[5][c] = false }
+        case 4:
+            // Sonrisa ∪ : las puntas suben, el centro baja.
+            g[4][3] = false; g[4][7] = false
+            for c in 4...6 { g[5][c] = false }
         default: break
         }
 
@@ -942,7 +952,7 @@ enum Clawd {
         return g
     }
 
-    enum Eyes { case open, closed, wide }
+    enum Eyes { case open, closed, wide, happy }
 
     static func asRows(_ g: [[Bool]]) -> [String] {
         g.map { String($0.map { $0 ? "#" : "." }) }
@@ -1009,8 +1019,6 @@ struct ClawdView: View {
     @State private var float = false
 
     private let beatTimer = Timer.publish(every: 0.22, on: .main, in: .common).autoconnect()
-    /// La carcajada va al doble de ritmo que las demás actividades.
-    private let laughTimer = Timer.publish(every: 0.11, on: .main, in: .common).autoconnect()
     private let blinkTimer = Timer.publish(every: 3.4, on: .main, in: .common).autoconnect()
 
     private var cell: CGFloat { clawdWidth / CGFloat(Clawd.cols) }
@@ -1024,7 +1032,7 @@ struct ClawdView: View {
         if blinking { return .closed }
         switch activity {
         case .nap, .yawn:   return .closed
-        case .laugh:        return .closed      // ojitos apretados de reírse
+        case .smile:        return .happy       // ojitos ^^
         case .workout:      return .wide
         default:
             return (mood == .alert || mood == .panic) ? .wide : .open
@@ -1034,7 +1042,7 @@ struct ClawdView: View {
     private var mouth: Int {
         switch activity {
         case .yawn:    return 3
-        case .laugh:   return 3      // bocaza abierta
+        case .smile:   return 4      // sonrisa curva
         case .dance:   return 1
         case .workout: return 2
         case .coffee:  return sipping ? 1 : 0
@@ -1058,7 +1066,6 @@ struct ClawdView: View {
         switch activity {
         case .coffee: return sipping ? 9 : 0
         case .dance:  return beat % 2 == 0 ? -11 : 11
-        case .laugh:  return beat % 2 == 0 ? -8 : 8
         default:      return 0
         }
     }
@@ -1068,20 +1075,20 @@ struct ClawdView: View {
         switch activity {
         case .workout: return CGSize(width: 0, height: beat % 2 == 0 ? 0 : 1.1)
         case .dance:   return CGSize(width: beat % 2 == 0 ? -0.5 : 0.5, height: 0)
-        // Sacudida vertical rápida: es lo que lee como carcajada.
-        case .laugh:   return CGSize(width: 0, height: beat % 2 == 0 ? -0.5 : 0.5)
+        // Un saltito de alegría al principio y ya: nada de sacudidas.
+        case .smile:   return CGSize(width: 0, height: beat < 3 ? -0.5 : 0)
         case .nap:     return CGSize(width: 0, height: 0.8)
         default:       return .zero
         }
     }
 
-    private var stretch: CGFloat { activity == .yawn ? 1.14 : 1 }
+    private var stretch: CGFloat { activity == .yawn ? 1.14 : activity == .smile ? 1.03 : 1 }
 
     /// Altura de cada bracito, en celdas (negativo = arriba).
     private func armShift(left: Bool) -> CGFloat {
         switch activity {
         case .dance:   return (left == (beat % 2 == 0)) ? -1 : 0.3
-        case .laugh:   return beat % 2 == 0 ? -1 : 0.4      // los dos brazos a la vez
+        case .smile:   return beat < 3 ? -0.6 : -0.2       // bracitos apenas alzados
         case .workout: return beat % 2 == 0 ? -1.2 : 0.3
         case .coffee:  return left ? 0 : -0.8
         case .apple:   return left ? 0 : -0.8
@@ -1173,14 +1180,10 @@ struct ClawdView: View {
                 }
             }
             .onReceive(beatTimer) { _ in
-                guard activity != .laugh else { return }
                 if activity != .idle { beat &+= 1 } else if beat != 0 { beat = 0 }
             }
-            .onReceive(laughTimer) { _ in
-                if activity == .laugh { beat &+= 1 }
-            }
             .onReceive(blinkTimer) { _ in
-                guard mood != .broken, activity != .nap, activity != .laugh else { return }
+                guard mood != .broken, activity != .nap, activity != .smile else { return }
                 blinking = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { blinking = false }
             }
@@ -1458,7 +1461,7 @@ struct DesktopPetView: View {
 
         Divider()
 
-        Button("Hazle cosquillas 😆") { store.poke() }
+        Button("Salúdalo 🙂") { store.poke() }
         Button("Actualizar ahora") { store.reload(announce: true, force: true) }
         Button("Que haga algo 🎲") { store.startActivity(forced: true) }
         Toggle("Actividades automáticas", isOn: $store.activitiesEnabled)
@@ -1497,7 +1500,7 @@ struct DesktopPetView: View {
                        size: 96, backdrop: true, tinted: store.tintClawd)
                 .contentShape(Circle())
                 .onTapGesture { store.poke() }
-                .help("Clic: hazle cosquillas · Clic derecho: opciones · Arrastra para mover")
+                .help("Clic: saludar · Clic derecho: opciones · Arrastra para mover")
                 .contextMenu { petMenu }
 
             HStack(spacing: 3) {
