@@ -67,7 +67,10 @@ open ClaudePet.app  # arranca
 ```
 
 - **Barra de menús** → `😺 25%`. Clic abre el panel con las barras, los reinicios y los ajustes.
-- **Mascota de escritorio** → arrástrala donde quieras; clic = releer; pasa el mouse para ver el detalle.
+- **Mascota de escritorio** → arrástrala donde quieras; pasa el mouse para ver el detalle.
+- **Clic sobre Clawd** → se ríe: cierra los ojitos, abre la bocaza, levanta los brazos y
+  se sacude, con un «¡jajaja!» en el bocadillo. Dura 2,6 s y vuelve solo a la calma.
+  De paso relee el archivo, que es gratis.
 - **Clic derecho sobre Clawd** → menú con lo que más se busca:
 
   | | |
@@ -139,6 +142,7 @@ reposo:
 | 🏋️ Ejercicio | hace sentadillas con los brazos arriba | 7 s |
 | 😴 Siesta | se hunde, cierra los ojos y le salen «Z» flotando | 13 s |
 | 🍎 Manzana | se come una manzana a mordiscos (va desapareciendo) | 8 s |
+| 😆 Risa | **solo al hacerle clic**, no sale sola | 2,6 s |
 
 **Gorrito de dormir** 🌙: entre las 6 p.m. y las 6 a.m. Clawd lo lleva puesto — también
 en el ícono de la barra de menús — y le dan más ganas de dormir y bostezar que de bailar.

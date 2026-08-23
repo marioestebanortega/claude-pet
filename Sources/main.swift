@@ -44,11 +44,12 @@ struct Usage: Equatable {
 
 /// Lo que Clawd está haciendo ahora mismo. En reposo solo flota y parpadea.
 enum Activity: String {
-    case idle, coffee, yawn, dance, workout, nap, apple
+    case idle, coffee, yawn, dance, workout, nap, apple, laugh
 
     var duration: Double {
         switch self {
         case .idle:    return 0
+        case .laugh:   return 2.6
         case .yawn:    return 3.5
         case .dance:   return 7
         case .workout: return 7
@@ -59,6 +60,7 @@ enum Activity: String {
     }
 
     /// De noche le da más por dormir y bostezar; de día, por el café y el baile.
+    /// `laugh` no entra en el sorteo: es una reacción al clic, no una ocurrencia.
     static func random(night: Bool) -> Activity {
         var pool: [Activity] = [.coffee, .yawn, .dance, .workout, .apple, .nap]
         pool += night ? [.nap, .nap, .yawn] : [.coffee, .dance, .workout]
@@ -653,6 +655,14 @@ final class PetStore: ObservableObject {
         }
     }
 
+    /// Clic sobre Clawd: se ríe. De paso relee, que es gratis e instantáneo.
+    func poke() {
+        reload(force: true)
+        say(["¡jaja!", "¡jeje!", "¡jiji!", "¡ay, para!", "¡me hace cosquillas!",
+             "¡ey!", "¡jajaja!"].randomElement() ?? "¡jaja!", seconds: 2.6)
+        startActivity(.laugh, forced: true)
+    }
+
     /// Lanza una actividad ahora. `forced` la dispara aunque estén desactivadas.
     func startActivity(_ chosen: Activity? = nil, forced: Bool = false) {
         guard activitiesEnabled || forced else { return }
@@ -999,6 +1009,8 @@ struct ClawdView: View {
     @State private var float = false
 
     private let beatTimer = Timer.publish(every: 0.22, on: .main, in: .common).autoconnect()
+    /// La carcajada va al doble de ritmo que las demás actividades.
+    private let laughTimer = Timer.publish(every: 0.11, on: .main, in: .common).autoconnect()
     private let blinkTimer = Timer.publish(every: 3.4, on: .main, in: .common).autoconnect()
 
     private var cell: CGFloat { clawdWidth / CGFloat(Clawd.cols) }
@@ -1012,6 +1024,7 @@ struct ClawdView: View {
         if blinking { return .closed }
         switch activity {
         case .nap, .yawn:   return .closed
+        case .laugh:        return .closed      // ojitos apretados de reírse
         case .workout:      return .wide
         default:
             return (mood == .alert || mood == .panic) ? .wide : .open
@@ -1021,6 +1034,7 @@ struct ClawdView: View {
     private var mouth: Int {
         switch activity {
         case .yawn:    return 3
+        case .laugh:   return 3      // bocaza abierta
         case .dance:   return 1
         case .workout: return 2
         case .coffee:  return sipping ? 1 : 0
@@ -1044,6 +1058,7 @@ struct ClawdView: View {
         switch activity {
         case .coffee: return sipping ? 9 : 0
         case .dance:  return beat % 2 == 0 ? -11 : 11
+        case .laugh:  return beat % 2 == 0 ? -8 : 8
         default:      return 0
         }
     }
@@ -1053,6 +1068,8 @@ struct ClawdView: View {
         switch activity {
         case .workout: return CGSize(width: 0, height: beat % 2 == 0 ? 0 : 1.1)
         case .dance:   return CGSize(width: beat % 2 == 0 ? -0.5 : 0.5, height: 0)
+        // Sacudida vertical rápida: es lo que lee como carcajada.
+        case .laugh:   return CGSize(width: 0, height: beat % 2 == 0 ? -0.5 : 0.5)
         case .nap:     return CGSize(width: 0, height: 0.8)
         default:       return .zero
         }
@@ -1064,6 +1081,7 @@ struct ClawdView: View {
     private func armShift(left: Bool) -> CGFloat {
         switch activity {
         case .dance:   return (left == (beat % 2 == 0)) ? -1 : 0.3
+        case .laugh:   return beat % 2 == 0 ? -1 : 0.4      // los dos brazos a la vez
         case .workout: return beat % 2 == 0 ? -1.2 : 0.3
         case .coffee:  return left ? 0 : -0.8
         case .apple:   return left ? 0 : -0.8
@@ -1155,10 +1173,14 @@ struct ClawdView: View {
                 }
             }
             .onReceive(beatTimer) { _ in
+                guard activity != .laugh else { return }
                 if activity != .idle { beat &+= 1 } else if beat != 0 { beat = 0 }
             }
+            .onReceive(laughTimer) { _ in
+                if activity == .laugh { beat &+= 1 }
+            }
             .onReceive(blinkTimer) { _ in
-                guard mood != .broken, activity != .nap else { return }
+                guard mood != .broken, activity != .nap, activity != .laugh else { return }
                 blinking = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { blinking = false }
             }
@@ -1288,6 +1310,8 @@ struct PanelView: View {
                            busy: store.forcing,
                            activity: store.activity, night: store.isNight,
                            size: 66, tinted: store.tintClawd)
+                    .contentShape(Circle())
+                    .onTapGesture { store.poke() }
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Claude Pet")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -1434,6 +1458,7 @@ struct DesktopPetView: View {
 
         Divider()
 
+        Button("Hazle cosquillas 😆") { store.poke() }
         Button("Actualizar ahora") { store.reload(announce: true, force: true) }
         Button("Que haga algo 🎲") { store.startActivity(forced: true) }
         Toggle("Actividades automáticas", isOn: $store.activitiesEnabled)
@@ -1471,8 +1496,8 @@ struct DesktopPetView: View {
                        activity: store.activity, night: store.isNight,
                        size: 96, backdrop: true, tinted: store.tintClawd)
                 .contentShape(Circle())
-                .onTapGesture { store.reload(announce: true, force: true) }
-                .help("Clic: releer · Clic derecho: opciones · Arrastra para mover")
+                .onTapGesture { store.poke() }
+                .help("Clic: hazle cosquillas · Clic derecho: opciones · Arrastra para mover")
                 .contextMenu { petMenu }
 
             HStack(spacing: 3) {
