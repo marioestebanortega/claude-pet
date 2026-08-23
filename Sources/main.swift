@@ -276,6 +276,20 @@ enum LocalUsage {
         }
     }
 
+    /// Descarta ventanas ya vencidas.
+    ///
+    /// Si `resets_at` quedó atrás, esa cifra es de un ciclo anterior y ya no
+    /// dice nada del actual. Pasa de verdad: todas las sesiones de Claude Code
+    /// escriben el mismo `pet-usage.json`, y una que lleva horas quieta reescribe
+    /// su foto vieja con marca de tiempo nueva. Un minuto de margen para el
+    /// desfase de relojes.
+    static func dropExpired(_ limits: [Limit]) -> [Limit] {
+        limits.filter { l in
+            guard let r = l.resetsAt else { return true }
+            return r.timeIntervalSinceNow > -60
+        }
+    }
+
     /// Lee `~/.claude.json` → `cachedUsageUtilization`. Gratis e instantáneo.
     static func fromClaudeJSON() -> Usage? {
         guard let data = try? Data(contentsOf: claudeJSON),
@@ -325,6 +339,7 @@ enum LocalUsage {
         // usan los planes de empresa: gasto en dinero y créditos mensuales.
         u.limits.append(contentsOf: spendLimits(util))
 
+        u.limits = dropExpired(u.limits)
         return u.limits.isEmpty ? nil : u
     }
 
@@ -434,6 +449,7 @@ enum LocalUsage {
             u.limits.append(Limit(id: id, label: lbl, percent: Int(pct.rounded()),
                                   resetsAt: reset, isActive: true, group: grp))
         }
+        u.limits = dropExpired(u.limits)
         return u.limits.isEmpty ? nil : u
     }
 

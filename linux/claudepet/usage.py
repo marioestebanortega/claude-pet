@@ -231,6 +231,18 @@ def _spend_limits(util: dict) -> list[Limit]:
     return out
 
 
+def _drop_expired(limits: list[Limit]) -> list[Limit]:
+    """Quita ventanas ya vencidas.
+
+    Si `resets_at` quedó atrás, esa cifra es de un ciclo anterior. Pasa porque
+    todas las sesiones de Claude Code escriben el mismo `pet-usage.json`: una
+    que lleva horas quieta reescribe su foto vieja con marca de tiempo nueva.
+    Un minuto de margen para el desfase de relojes.
+    """
+    now = time.time()
+    return [l for l in limits if not l.resets_at or l.resets_at > now - 60]
+
+
 def from_claude_json() -> Usage | None:
     """Fuente rica: todas las dimensiones, pero se refresca poco."""
     root = _load(CLAUDE_JSON)
@@ -272,6 +284,7 @@ def from_claude_json() -> Usage | None:
                                       _dollar_detail(w)))
 
     u.limits.extend(_spend_limits(util))
+    u.limits = _drop_expired(u.limits)
     return u if u.limits else None
 
 
@@ -295,6 +308,7 @@ def from_statusline() -> Usage | None:
             continue
         u.limits.append(Limit(lid, label, round(w["used_percentage"]),
                               _iso(w.get("resets_at")), True, grp))
+    u.limits = _drop_expired(u.limits)
     return u if u.limits else None
 
 

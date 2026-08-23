@@ -45,6 +45,32 @@ mensaje del asistente](https://code.claude.com/docs/es/statusline#how-status-lin
 así que si dejas Claude Code quieto el dato se congela igual. Con él corre también en
 temporizador. Verificado: el archivo se reescribe cada ~10 s y la app lo lee al instante.
 
+### Varias sesiones de Claude Code a la vez
+
+Todas escriben el **mismo** `~/.claude/pet-usage.json`, cada una en cada render de su
+línea de estado. Y una sesión que lleva horas quieta sigue rindiendo: reescribe sus
+cifras de entonces con marca de tiempo de ahora. Medido: con dos sesiones abiertas, el
+archivo alternaba entre `0/26 %` y `2/27 %` cada pocos segundos, y la mascota con él.
+
+Quedarse con la escritura más reciente no sirve, porque la foto vieja también llega
+"recién escrita". Lo que sí distingue es `resets_at`, que identifica la ventana:
+
+| Comparación con lo guardado | Qué se hace |
+|---|---|
+| ventana posterior | manda el dato nuevo — la anterior ya se reinició |
+| ventana anterior | la foto entrante es vieja, se ignora |
+| misma ventana | gana el porcentaje mayor: dentro de una ventana el consumo solo sube |
+
+Esa fusión la hace el hook antes de escribir, bajo un candado (`flock`) sobre un archivo
+aparte — la escritura es atómica y cambia de inodo cada vez, así que un candado sobre el
+propio archivo no protegería a la pasada siguiente. Si otra sesión lo tiene cogido, esta
+no escribe: está guardando la misma verdad y en diez segundos se vuelve a pasar.
+
+De regalo, todas las líneas de estado enseñan la misma cifra, no cada una la suya.
+
+Además, los dos lectores **descartan ventanas ya vencidas**: si `resets_at` quedó atrás,
+esa cifra es de un ciclo anterior. Así la app se defiende sola aunque el hook sea viejo.
+
 ### Cuándo avisa de dato viejo
 
 Sin el hook, los números pueden quedarse viejos sin que nada haya fallado — es la causa
