@@ -14,12 +14,22 @@ VERSION=$(plutil -extract CFBundleShortVersionString raw ClaudePet.app/Contents/
 OUT="ClaudePet-$VERSION.zip"
 
 rm -f "$OUT"
+# Se empaquetan juntos la app y el instalador: sin el instalador, a quien la
+# reciba macOS solo le ofrece "Mover a la papelera".
+STAGE=$(mktemp -d)
+ditto ClaudePet.app "$STAGE/ClaudePet.app"
+cp install.sh "$STAGE/install.sh"
+cp INSTALAR.md "$STAGE/LEEME.md"
+
 # ditto conserva los metadatos del bundle; `zip` a secas rompe la firma.
-ditto -c -k --sequesterRsrc --keepParent ClaudePet.app "$OUT"
+ditto -c -k --sequesterRsrc "$STAGE" "$OUT"
+rm -rf "$STAGE"
 
 echo ""
 echo "📦 $OUT  ($(du -h "$OUT" | cut -f1))"
 echo ""
-echo "Dile a quien lo reciba que, tras descomprimir, corra esto una vez:"
-echo "    xattr -dr com.apple.quarantine /ruta/a/ClaudePet.app"
-echo "…o que lo abra desde Ajustes → Privacidad y seguridad → «Abrir igualmente»."
+echo "Dile a quien lo reciba: descomprimir y, en la Terminal, correr"
+echo "    bash ~/Downloads/install.sh"
+echo ""
+echo "Es UN paso. Si en cambio hace doble clic en la app, macOS solo le"
+echo "ofrecerá «Mover a la papelera»: la firma es ad-hoc, sin Developer ID."

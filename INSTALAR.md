@@ -41,36 +41,55 @@ Si faltan, `build.sh` te lo dice y se instalan con `xcode-select --install`.
 
 ## Opción B — recibir el `.zip`
 
-`./package.sh` genera un `ClaudePet-1.0.zip` de ~200 KB. Funciona, pero hay un
-paso extra ineludible.
-
-**Por qué:** la app va firmada *ad-hoc*, sin cuenta de desarrollador de Apple.
-La firma es válida (`codesign --verify` pasa), pero Gatekeeper la rechaza igual
-porque no tiene Developer ID ni está notarizada. Al descomprimir, macOS le pone
-el atributo de cuarentena y se niega a abrirla.
-
-Tras descomprimir, **una** de estas dos:
+`./package.sh` genera un `ClaudePet-1.0.zip` de ~200 KB que lleva dentro la app, este
+documento y un **instalador**. Para quien lo recibe es un solo paso:
 
 ```bash
-xattr -dr com.apple.quarantine /ruta/a/ClaudePet.app
+bash ~/Downloads/install.sh
 ```
 
-O bien: intentar abrirla, dejar que macOS la bloquee, e ir a
-**Ajustes → Privacidad y seguridad → «Abrir igualmente»**.
+El instalador copia la app a `/Applications`, le quita la cuarentena, la abre y
+pregunta si quiere que arranque al iniciar sesión. (Con `CLAUDEPET_DEST` se puede
+instalar en otro sitio, p. ej. `~/Applications`.)
 
-> En macOS 15+ el viejo truco de clic derecho → Abrir ya no sirve.
+### Por qué hace falta un instalador
 
-**Para quitar ese paso** haría falta una cuenta del Apple Developer Program
-(99 USD/año) para firmar con Developer ID y notarizar. Para una app que se
-comparte entre conocidos no compensa; la Opción A resuelve lo mismo gratis.
+Porque **si hace doble clic, macOS no le da salida**. La app va firmada *ad-hoc*, sin
+cuenta de desarrollador de Apple. Al descargarla queda con el atributo de cuarentena, y
+el diálogo que sale es este:
 
----
+> **«ClaudePet» no se abrió**
+> Apple no pudo verificar que «ClaudePet» esté libre de malware…
+> **[Mover a la papelera]** ← el botón azul, el predeterminado
+> [Listo]
+
+**No hay botón de «Abrir» ni de «Permitir».** No es un diálogo de permisos que se pueda
+aceptar: la única salida que ofrece es borrar la app. Quien no sepa que existe
+Ajustes → Privacidad y seguridad → «Abrir igualmente» va a concluir que está rota.
+
+> En macOS 15+ el viejo truco de clic derecho → Abrir tampoco sirve ya.
+
+### El detalle que lo hace funcionar
+
+Lo que dispara el bloqueo es **el atributo de cuarentena**, no el veredicto de
+Gatekeeper. Comprobado: tras quitar el atributo, `spctl --assess` sigue diciendo
+`rejected` y aun así la app abre sin una sola queja — macOS solo consulta a Gatekeeper
+cuando el archivo viene marcado como descargado.
+
+Por eso `xattr -dr com.apple.quarantine` basta, y por eso un script invocado a propósito
+desde la Terminal puede hacerlo aunque el doble clic no pueda.
+
+### Para quitar hasta ese paso
+
+Haría falta una cuenta del Apple Developer Program (99 USD/año) para firmar con
+Developer ID y notarizar. Para una app que se comparte entre conocidos no compensa: la
+Opción A resuelve lo mismo gratis, y la B lo deja en un comando.
 
 ## Desinstalar
 
 ```bash
-./start-at-login.sh --off     # quitar del arranque
-rm -rf ClaudePet.app          # borrar la app
+./start-at-login.sh --off             # quitar del arranque
+rm -rf /Applications/ClaudePet.app    # borrar la app
 ```
 
 No deja nada más: sus ajustes viven en `~/Library/Preferences/com.mario.claudepet.plist`
