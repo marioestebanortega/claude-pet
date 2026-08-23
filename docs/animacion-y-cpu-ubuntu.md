@@ -123,6 +123,30 @@ caer en él **a propósito**, buscando que se vea más fino.
   dibujar los píxeles, es despertar.
 - **No tocar nada de macOS.** Ese lado ya está arreglado y medido (commit `b3e02db`).
 
+## El encargo, en concreto
+
+No hay que cambiar código. Es solo cerrar la medición que en macOS nunca se hizo:
+
+1. Con la mascota visible en el escritorio y sin tocar nada:
+   ```bash
+   ./linux/medir-cpu.sh 60
+   ```
+   Mide el proceso y el compositor a la vez, leyendo `/proc` — no `top`, cuyo `%CPU` es
+   una media que arrastra toda la vida del proceso.
+2. Repetirlo con la mascota oculta (clic derecho → «Ocultar del escritorio»). La
+   diferencia en el compositor es el coste que la mascota provoca **fuera** de su propio
+   proceso, y que no aparece en ninguna otra medición.
+3. Anotar las dos cifras en `linux/README.md`, en la sección «Por qué la mascota se mueve
+   a saltos», con el mismo formato de tabla que usa el README de macOS.
+
+**Criterio**: se espera el proceso por debajo del 1 %. Si sale por encima, el culpable no
+es el vaivén — busca otro redibujado antes de tocar la animación, y usa el método de la
+tabla de arriba: apagar un sospechoso cada vez y medir, en vez de optimizar a ojo.
+
+Si el compositor sube de forma apreciable con la mascota visible, dilo en el README con
+el número. Es información honesta para quien decida si la deja en el escritorio o se
+queda solo con el applet de bandeja.
+
 ## La regla, en una línea
 
 En una mascota de escritorio, **el movimiento continuo se paga a precio de reloj, no de
