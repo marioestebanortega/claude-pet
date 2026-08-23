@@ -28,6 +28,11 @@ de seguridad (leer cuesta ~0 ms, y solo re-parsea si cambió el `mtime`).
 
 ### Frescura del dato — instala el hook
 
+Al instalar puede que Clawd muestre `0/0 %`: `~/.claude.json` todavía no trae el bloque
+`cachedUsageUtilization` (lo escribe Claude Code por su cuenta, cuando le da) y sin el
+hook no hay otra fuente. Instalarlo es lo que hace aparecer las cifras **desde el primer
+momento** — y además las mantiene frescas:
+
 **Medido en esta máquina: `~/.claude.json` se refrescó una sola vez en 22 minutos**, y eso
 con Claude Code abierto y en uso. Como fuente única no basta.
 
@@ -44,6 +49,10 @@ configurado así:
 mensaje del asistente](https://code.claude.com/docs/es/statusline#how-status-lines-work),
 así que si dejas Claude Code quieto el dato se congela igual. Con él corre también en
 temporizador. Verificado: el archivo se reescribe cada ~10 s y la app lo lee al instante.
+
+**Reinicia Claude Code tras instalarlo.** El `statusLine` se lee al arrancar, así que
+hasta que no reinicies no empieza a escribir `pet-usage.json` — es el paso que falta más
+fácil de olvidar, y la causa típica de seguir viendo `0/0 %`.
 
 ### Varias sesiones de Claude Code a la vez
 
@@ -129,6 +138,9 @@ versionan solo porque no hay una página de releases donde colgarlos.
 ./build.sh          # compila (no necesita Xcode, basta con Command Line Tools)
 open ClaudePet.app  # arranca
 ```
+
+> ¿Aparece con `0/0 %`? Falta el paso de siempre: instala el hook de `statusLine` y
+> **reinicia Claude Code** — ver [Frescura del dato — instala el hook](#frescura-del-dato--instala-el-hook).
 
 - **Barra de menús** → `😺 25%`. Clic abre el panel con las barras, los reinicios y los ajustes.
 - **Mascota de escritorio** → arrástrala donde quieras; pasa el mouse para ver el detalle.
@@ -282,7 +294,7 @@ ClaudePet.app/Contents/MacOS/ClaudePet --dump   # lista los permisos y su estado
 ```bash
 ./start-at-login.sh        # arranca sola al iniciar sesión (--off para quitarlo)
 ./package.sh               # .zip de ~200 KB para compartir
-./install-statusline.sh    # datos más frescos vía hook de statusLine (opcional)
+./install-statusline.sh    # cifras al instante + más frescas (reinicia Claude Code después)
 ./uninstall-statusline.sh  # revertir lo anterior
 ./ClaudePet.app/Contents/MacOS/ClaudePet --dump   # diagnóstico por consola
 ```

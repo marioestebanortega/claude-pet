@@ -15,11 +15,13 @@ mkdir -p dist
 OUT="dist/ClaudePet-$VERSION.zip"
 
 rm -f "$OUT"
-# Se empaquetan juntos la app y el instalador: sin el instalador, a quien la
-# reciba macOS solo le ofrece "Mover a la papelera".
+# Se empaquetan juntos la app, el instalador y el hook de statusLine. Sin el
+# instalador, a quien la reciba macOS solo le ofrece "Mover a la papelera"; sin
+# el hook, Clawd puede quedarse en "0/0 %" porque no tiene de dónde leer la cuota.
 STAGE=$(mktemp -d)
 ditto ClaudePet.app "$STAGE/ClaudePet.app"
 cp install.sh "$STAGE/install.sh"
+cp install-statusline.sh statusline-pet.py "$STAGE/"
 cp INSTALAR.md "$STAGE/LEEME.md"
 
 # ditto conserva los metadatos del bundle; `zip` a secas rompe la firma.

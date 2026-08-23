@@ -75,6 +75,22 @@ case "$L" in
   *) echo "  Vale. Se puede activar luego desde el panel de la app." ;;
 esac
 
+# ── 5. Hook de statusLine ─────────────────────────────────────
+# Sin él Clawd puede quedarse en "0/0 %": ~/.claude.json a veces no trae aún
+# el bloque de cuota y esta es la fuente que la hace aparecer. Corre 100% local.
+HOOK="$HERE/install-statusline.sh"
+if [ -f "$HOOK" ] && command -v python3 >/dev/null 2>&1; then
+  echo ""
+  echo "  Para que Clawd muestre tu cuota hace falta el hook de statusLine."
+  echo "  (Sin él puede quedarse en 0/0 %.) No usa red ni gasta tokens."
+  read -r -p "  ¿Lo instalo ahora? [S/n] " H
+  case "$H" in
+    [nN]) echo "  Vale. Puedes instalarlo luego con ./install-statusline.sh" ;;
+    *) bash "$HOOK"
+       echo "  ⚠️  Reinicia Claude Code para que empiece a escribir los datos." ;;
+  esac
+fi
+
 echo ""
 echo "  Para desinstalar:  rm -rf $DEST"
 echo ""

@@ -98,6 +98,39 @@ Haría falta una cuenta del Apple Developer Program (99 USD/año) para firmar co
 Developer ID y notarizar. Para una app que se comparte entre conocidos no compensa: la
 Opción A resuelve lo mismo gratis, y la B lo deja en un comando.
 
+## Que muestre tu cuota (el paso que falta al instalar)
+
+Recién instalada, Clawd puede aparecer con **`0/0 %`**. No está rota: es que todavía no
+tiene de dónde leer tu cuota. Lee de dos sitios, y al principio los dos pueden estar
+vacíos:
+
+- `~/.claude.json` → `cachedUsageUtilization`: lo escribe **Claude Code solo**, pero
+  puede tardar bastante o no haberlo escrito aún.
+- `~/.claude/pet-usage.json`: lo escribe el hook de `statusLine`, que **no se instala
+  con la app**.
+
+Para que muestre cifras desde el primer momento, instala el hook (gratis, sin red ni
+tokens) y **reinicia Claude Code**:
+
+```bash
+./install-statusline.sh   # engancha el hook en ~/.claude/settings.json (hace backup)
+```
+
+> **Reinicia Claude Code después.** El `statusLine` se carga al arrancar, así que hasta
+> que no reinicies no empieza a escribir los datos. En cuanto reinicies, la barra de
+> estado muestra algo como `😺 37 % · 📅 12 %` y Clawd se pone al día en un segundo.
+
+¿No sabes qué está leyendo? Este comando lo dice sin tocar nada:
+
+```bash
+ClaudePet.app/Contents/MacOS/ClaudePet --dump
+```
+
+> Si instalaste desde el `.zip`, `install.sh` ya te ofrece instalar el hook al final;
+> `install-statusline.sh` viene incluido, así que también puedes correrlo a mano.
+
+---
+
 ## Desinstalar
 
 ```bash
