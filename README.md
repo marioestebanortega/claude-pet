@@ -85,6 +85,31 @@ mueve, así que un dato de hace horas sigue siendo correcto y el aviso sería pu
 Se detecta por el `mtime` de los dos archivos, que es un `stat` — sin lanzar procesos ni
 pedir permisos.
 
+### Por qué Clawd se mueve a saltos
+
+Porque moverse suave costaba **el 12 % de un núcleo, todo el rato**. Medido en esta
+máquina apagando sospechosos de uno en uno, con la mascota quieta en el escritorio:
+
+| Qué se probó | CPU |
+|---|---|
+| como estaba: `withAnimation(...).repeatForever` | 11,2 % |
+| sin el material translúcido del plato | 13,4 % |
+| rasterizando el sprite con `drawingGroup()` | 12,5 % |
+| sin la animación del spinner de «cargando» | 12,7 % |
+| bajando el vaivén a 30 fps | 3,9 % |
+| bajando el vaivén a 15 fps | 3,8 % |
+| **a saltos, un cambio cada 0,9 s** | **0,0 %** |
+| sin moverse en absoluto | 0,5 % |
+
+Ninguno de los sospechosos «caros» tenía la culpa: ni el desenfoque, ni las ~180 celdas
+del lienzo, ni la sombra. Era la animación continua, que hace repintar a la cadencia de
+la pantalla — 120 Hz en un Mac con ProMotion. Y no se arregla pidiendo menos fotogramas:
+a 30 y a 15 fps costaba lo mismo. Cualquier movimiento interpolado tiene ese suelo.
+
+Un vaivén de ±1,3 px cada 1,7 s no justifica ese precio, así que ahora son dos posiciones
+y un salto cada 0,9 s. Sale gratis y encaja: el pixel-art nunca interpoló entre
+fotogramas, y así es como respiran los sprites de toda la vida.
+
 ## Descargar
 
 Los ejecutables van versionados en [`dist/`](dist/), así que un `git clone` ya

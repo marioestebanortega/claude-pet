@@ -1268,6 +1268,22 @@ struct ClawdView: View {
     @State private var beat = 0
     @State private var float = false
 
+    /// El vaivén, a saltos y no interpolado.
+    ///
+    /// Antes era `withAnimation(.easeInOut(1.7)).repeatForever`, y ahí estaba
+    /// **todo** el consumo de la app: una animación continua repinta a la
+    /// cadencia de la pantalla — 120 Hz en un Mac con ProMotion — y eso costaba
+    /// un 12 % de un núcleo con Clawd quieto. Medido apagando sospechosos de uno
+    /// en uno: no era el lienzo de píxeles (rasterizarlo con `drawingGroup` no
+    /// cambió nada), ni el material del plato, ni su sombra, ni el spinner. Era
+    /// la cadencia y solo la cadencia, y no baja con menos fotogramas: a 30 fps
+    /// y a 15 fps costaba lo mismo, ~3,8 %. Cualquier movimiento continuo tiene
+    /// ese suelo.
+    ///
+    /// Así que se mueve a saltos: dos posiciones, un cambio cada 0,9 s. Sale a
+    /// 0,0 % medido, y de paso es como respiran los sprites de verdad — el
+    /// pixel-art nunca interpoló entre fotogramas.
+    private let floatTimer = Timer.publish(every: 0.9, on: .main, in: .common).autoconnect()
     private let beatTimer = Timer.publish(every: 0.22, on: .main, in: .common).autoconnect()
     private let blinkTimer = Timer.publish(every: 3.4, on: .main, in: .common).autoconnect()
 
@@ -1424,11 +1440,7 @@ struct ClawdView: View {
             .offset(x: cell * 0.5, y: -cell * 1.5)
             .offset(y: float ? -cell * 0.3 : cell * 0.3)
             .animation(.easeInOut(duration: 0.18), value: beat)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) {
-                    float = true
-                }
-            }
+            .onReceive(floatTimer) { _ in float.toggle() }
             .onReceive(beatTimer) { _ in
                 if activity != .idle { beat &+= 1 } else if beat != 0 { beat = 0 }
             }
