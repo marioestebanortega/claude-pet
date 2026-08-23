@@ -62,7 +62,18 @@ open ClaudePet.app  # arranca
 
 - **Barra de menús** → `😺 25%`. Clic abre el panel con las barras, los reinicios y los ajustes.
 - **Mascota de escritorio** → arrástrala donde quieras; clic = releer; pasa el mouse para ver el detalle.
-  Si se te pierde en otro monitor, usa **«Traer a Clawd a esta pantalla»** en el panel.
+- **Clic derecho sobre Clawd** → menú con lo que más se busca:
+
+  | | |
+  |---|---|
+  | **Ocultar del escritorio** | se queda solo en la barra de menús |
+  | Actualizar ahora | vuelve a leer el archivo local |
+  | Que haga algo 🎲 | dispara una actividad |
+  | Actividades automáticas | apaga o enciende las ocurrencias |
+  | Traer a esta pantalla | por si se te pierde en otro monitor |
+  | Salir de Claude Pet | |
+
+  Para que vuelva al escritorio: el interruptor **«Mascota en el escritorio»** del panel.
 - **Notificaciones** → avisa al cruzar 50 %, 70 % y 90 % (solo al subir de nivel, no en cada lectura).
 
 ### Humores

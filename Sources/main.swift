@@ -1407,6 +1407,27 @@ struct DesktopPetView: View {
 
     private var stale: Bool { store.dataLooksStale }
 
+    /// Menú de clic derecho. Existe porque esconder la mascota es lo que más se
+    /// busca, y tenerlo solo dentro del panel de la barra de menús no se encuentra.
+    @ViewBuilder private var petMenu: some View {
+        Button("Ocultar del escritorio") { store.petVisible = false }
+        Text("Clawd se queda en la barra de menús")
+
+        Divider()
+
+        Button("Actualizar ahora") { store.reload(announce: true) }
+        Button("Que haga algo 🎲") { store.startActivity(forced: true) }
+        Toggle("Actividades automáticas", isOn: $store.activitiesEnabled)
+
+        Divider()
+
+        Button("Traer a esta pantalla") { store.onRecenterPet?() }
+
+        Divider()
+
+        Button("Salir de Claude Pet") { NSApplication.shared.terminate(nil) }
+    }
+
     private var hoverText: String {
         guard let u = store.usage else { return "Sin datos todavía" }
         let parts = [u.session, u.weekly].compactMap { $0 }
@@ -1432,7 +1453,8 @@ struct DesktopPetView: View {
                        size: 96, backdrop: true, tinted: store.tintClawd)
                 .contentShape(Circle())
                 .onTapGesture { store.reload(announce: true) }
-                .help("Clic: releer · Arrastra para mover")
+                .help("Clic: releer · Clic derecho: opciones · Arrastra para mover")
+                .contextMenu { petMenu }
 
             HStack(spacing: 3) {
                 if stale {
@@ -1501,7 +1523,9 @@ final class PetPanel: NSPanel {
                                y: vis.minY + 24))
     }
 
-    override var canBecomeKey: Bool { false }
+    /// Con `.nonactivatingPanel` puede volverse key sin activar la app, que es
+    /// lo que necesita el menú contextual para aparecer.
+    override var canBecomeKey: Bool { true }
 }
 
 // ─────────────────────────────────────────────────────────────
