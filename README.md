@@ -226,6 +226,13 @@ ClaudePet.app/Contents/MacOS/ClaudePet --dump   # lista los permisos y su estado
 `install-statusline.sh` hace copia de seguridad de tu `~/.claude/settings.json`
 antes de tocarlo y te avisa si ya tenías otro `statusLine`.
 
+## Linux
+
+Hay una versión para Ubuntu en [`linux/`](linux/README.md), en Python, con applet de
+bandeja y paquete `.deb`. La app de macOS **no se puede portar**: sus cinco frameworks
+son exclusivos de Darwin. El motor de datos sí es el mismo criterio, y da las mismas
+cifras.
+
 ## Estructura
 
 ```

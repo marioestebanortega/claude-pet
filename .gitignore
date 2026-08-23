@@ -45,3 +45,6 @@ scratch/
 
 # Paquetes generados para compartir
 ClaudePet-*.zip
+
+# Paquetes de Linux generados
+linux/*.deb
