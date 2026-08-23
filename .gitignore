@@ -1,0 +1,44 @@
+# ── Producto compilado ────────────────────────────────────────
+# Se regenera con ./build.sh, no tiene por qué versionarse.
+ClaudePet.app/
+build/
+.build/
+DerivedData/
+
+# ── Artefactos del compilador Swift ───────────────────────────
+*.o
+*.swiftmodule
+*.swiftdoc
+*.swiftsourceinfo
+*.abi.json
+*.dSYM/
+
+# ── macOS ─────────────────────────────────────────────────────
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.AppleDouble
+Icon?
+
+# ── Xcode (por si algún día se abre desde ahí) ────────────────
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+
+# ── Editores ──────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── Datos locales, nunca al repo ──────────────────────────────
+# El archivo que escribe el hook de statusLine: es del usuario,
+# lleva su consumo real y cambia a cada rato.
+pet-usage.json
+*.log
+*.tmp
+scratch/

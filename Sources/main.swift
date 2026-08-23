@@ -1,0 +1,1394 @@
+import SwiftUI
+import AppKit
+import Combine
+
+// ─────────────────────────────────────────────────────────────
+// MARK: - Modelo
+// ─────────────────────────────────────────────────────────────
+
+struct Limit: Identifiable, Equatable {
+    let id: String        // "session", "weekly_all", "weekly_scoped:Fable"
+    let label: String
+    let percent: Int
+    let resetsAt: Date?
+    let isActive: Bool
+    let group: String     // "session" | "weekly"
+}
+
+struct Usage: Equatable {
+    var limits: [Limit] = []
+    var fetchedAt: Date = Date()
+    var source: String = ""       // de dónde salió el dato
+
+    var session: Limit?  { limits.first { $0.id == "session" } }
+    var weekly: Limit?   { limits.first { $0.id == "weekly_all" } }
+    var scoped: [Limit]  { limits.filter { $0.id.hasPrefix("weekly_scoped") && $0.percent > 0 } }
+
+    var sessionPct: Int { session?.percent ?? 0 }
+    var weekPct: Int { weekly?.percent ?? 0 }
+
+    /// El número que define el humor: lo más crítico de todo.
+    var worst: Int { limits.map(\.percent).max() ?? 0 }
+
+    /// Qué tan viejo es el dato.
+    var age: TimeInterval { Date().timeIntervalSince(fetchedAt) }
+}
+
+/// Lo que Clawd está haciendo ahora mismo. En reposo solo flota y parpadea.
+enum Activity: String {
+    case idle, coffee, yawn, dance, workout, nap, apple
+
+    var duration: Double {
+        switch self {
+        case .idle:    return 0
+        case .yawn:    return 3.5
+        case .dance:   return 7
+        case .workout: return 7
+        case .apple:   return 8
+        case .coffee:  return 9
+        case .nap:     return 13
+        }
+    }
+
+    /// De noche le da más por dormir y bostezar; de día, por el café y el baile.
+    static func random(night: Bool) -> Activity {
+        var pool: [Activity] = [.coffee, .yawn, .dance, .workout, .apple, .nap]
+        pool += night ? [.nap, .nap, .yawn] : [.coffee, .dance, .workout]
+        return pool.randomElement() ?? .yawn
+    }
+}
+
+enum Palette {
+    static func hex(_ v: Int) -> Color {
+        Color(red: Double((v >> 16) & 0xFF) / 255,
+              green: Double((v >> 8) & 0xFF) / 255,
+              blue: Double(v & 0xFF) / 255)
+    }
+
+    /// Color que cambia con el tema del sistema (el panel es claro, el escritorio no).
+    static func dyn(light: Int, dark: Int) -> Color {
+        func ns(_ v: Int) -> NSColor {
+            NSColor(red: CGFloat((v >> 16) & 0xFF) / 255,
+                    green: CGFloat((v >> 8) & 0xFF) / 255,
+                    blue: CGFloat(v & 0xFF) / 255, alpha: 1)
+        }
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? ns(dark) : ns(light)
+        })
+    }
+}
+
+enum Mood: Int {
+    case chill, ok, alert, panic, broken
+
+    static func from(_ pct: Int) -> Mood {
+        switch pct {
+        case ..<40:  return .chill
+        case ..<70:  return .ok
+        case ..<90:  return .alert
+        default:     return .panic
+        }
+    }
+
+    var face: String {
+        switch self {
+        case .chill:  return "😺"
+        case .ok:     return "😼"
+        case .alert:  return "🙀"
+        case .panic:  return "😿"
+        case .broken: return "🫥"
+        }
+    }
+
+    /// Color de relleno: anillo y barras de progreso. Vivo, se ve sobre cualquier fondo.
+    var color: Color {
+        switch self {
+        case .chill:  return Palette.hex(0x34C759)
+        case .ok:     return Palette.hex(0xFFB020)
+        case .alert:  return Palette.hex(0xFF8A2B)
+        case .panic:  return Palette.hex(0xFF4D4D)
+        case .broken: return Palette.hex(0x98989D)
+        }
+    }
+
+    /// Versión profunda: fondo sólido del badge, con texto blanco encima.
+    var deep: Color {
+        switch self {
+        case .chill:  return Palette.hex(0x1E9455)
+        case .ok:     return Palette.hex(0xB07A06)
+        case .alert:  return Palette.hex(0xC4551C)
+        case .panic:  return Palette.hex(0xC42B2B)
+        case .broken: return Palette.hex(0x6E6E73)
+        }
+    }
+
+    /// El porcentaje como texto suelto. Se oscurece en tema claro y se aclara en oscuro,
+    /// porque el color de relleno es demasiado claro para leerse sobre fondo blanco.
+    var textColor: Color {
+        switch self {
+        case .chill:  return Palette.dyn(light: 0x157F45, dark: 0x4ADE80)
+        case .ok:     return Palette.dyn(light: 0x8A5E08, dark: 0xFBBF4B)
+        case .alert:  return Palette.dyn(light: 0xB2521B, dark: 0xFDA46A)
+        case .panic:  return Palette.dyn(light: 0xB32424, dark: 0xFF7A7A)
+        case .broken: return Palette.dyn(light: 0x6E6E73, dark: 0xA8A8AD)
+        }
+    }
+
+    var phrases: [String] {
+        switch self {
+        case .chill:
+            return ["Vamos suaves, dale con todo 😌", "Cuota fresquita, aprovecha",
+                    "Todo en orden por acá", "Ni la he sentido, sigue"]
+        case .ok:
+            return ["Vamos a mitad de camino", "Ritmo bueno, ojo no más",
+                    "Ya calentamos motores 🔥", "Medio tanque, tranquilo"]
+        case .alert:
+            return ["Uy, cuidado con el gasto 👀", "Bájale un poquito, ¿no?",
+                    "Se está poniendo caro esto", "Ya casi tocamos techo"]
+        case .panic:
+            return ["¡Se nos acaba la cuota! 😱", "MODO AHORRO, YA",
+                    "Respira. Guarda algo pa' luego", "Estamos en las últimas 💀"]
+        case .broken:
+            return ["No encuentro tus datos aún 🫠", "Usa Claude Code un momento y vuelvo"]
+        }
+    }
+
+    func phrase(seed: Int) -> String { phrases[abs(seed) % phrases.count] }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARK: - Lectura local (COSTO CERO — no consume cuota)
+// ─────────────────────────────────────────────────────────────
+
+enum LocalUsage {
+    static var claudeJSON: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
+    }
+    /// Archivo que escribe el hook opcional de statusLine.
+    static var statusLineJSON: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/pet-usage.json")
+    }
+
+    private static let iso: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static func date(_ s: Any?) -> Date? {
+        guard let s = s as? String else { return nil }
+        if let d = iso.date(from: s) { return d }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
+    }
+
+    private static func label(kind: String, scope: [String: Any]?) -> String {
+        switch kind {
+        case "session":     return "Sesión (5 h)"
+        case "weekly_all":  return "Semana (todos los modelos)"
+        case "weekly_scoped":
+            let model = (scope?["model"] as? [String: Any])?["display_name"] as? String
+            return "Semana (\(model ?? "modelo"))"
+        default:            return kind
+        }
+    }
+
+    /// Lee `~/.claude.json` → `cachedUsageUtilization`. Gratis e instantáneo.
+    static func fromClaudeJSON() -> Usage? {
+        guard let data = try? Data(contentsOf: claudeJSON),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cached = root["cachedUsageUtilization"] as? [String: Any],
+              let util = cached["utilization"] as? [String: Any]
+        else { return nil }
+
+        var u = Usage()
+        u.source = "~/.claude.json"
+        if let ms = cached["fetchedAtMs"] as? Double {
+            u.fetchedAt = Date(timeIntervalSince1970: ms / 1000)
+        }
+
+        if let arr = util["limits"] as? [[String: Any]] {
+            for l in arr {
+                let kind = l["kind"] as? String ?? "?"
+                let scope = l["scope"] as? [String: Any]
+                var id = kind
+                if kind == "weekly_scoped" {
+                    let m = (scope?["model"] as? [String: Any])?["display_name"] as? String ?? "?"
+                    id = "weekly_scoped:\(m)"
+                }
+                u.limits.append(Limit(
+                    id: id,
+                    label: label(kind: kind, scope: scope),
+                    percent: Int((l["percent"] as? Double) ?? 0),
+                    resetsAt: date(l["resets_at"]),
+                    isActive: (l["is_active"] as? Bool) ?? false,
+                    group: l["group"] as? String ?? kind
+                ))
+            }
+        } else {
+            // Respaldo por si algún día desaparece `limits`.
+            for (key, lbl) in [("five_hour", "Sesión (5 h)"), ("seven_day", "Semana (todos los modelos)")] {
+                guard let d = util[key] as? [String: Any],
+                      let pct = d["utilization"] as? Double else { continue }
+                u.limits.append(Limit(id: key == "five_hour" ? "session" : "weekly_all",
+                                      label: lbl, percent: Int(pct),
+                                      resetsAt: date(d["resets_at"]),
+                                      isActive: true,
+                                      group: key == "five_hour" ? "session" : "weekly"))
+            }
+        }
+        return u.limits.isEmpty ? nil : u
+    }
+
+    /// Lee el archivo del hook de statusLine (formato `rate_limits`).
+    static func fromStatusLine() -> Usage? {
+        guard let data = try? Data(contentsOf: statusLineJSON),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rl = root["rate_limits"] as? [String: Any]
+        else { return nil }
+
+        var u = Usage()
+        u.source = "statusLine"
+        if let ms = root["written_at_ms"] as? Double {
+            u.fetchedAt = Date(timeIntervalSince1970: ms / 1000)
+        } else if let attrs = try? FileManager.default.attributesOfItem(atPath: statusLineJSON.path),
+                  let m = attrs[.modificationDate] as? Date {
+            u.fetchedAt = m
+        }
+
+        for (key, lbl, id, grp) in [("five_hour", "Sesión (5 h)", "session", "session"),
+                                    ("seven_day", "Semana (todos los modelos)", "weekly_all", "weekly")] {
+            guard let d = rl[key] as? [String: Any],
+                  let pct = d["used_percentage"] as? Double else { continue }
+            var reset: Date? = nil
+            if let ts = d["resets_at"] as? Double { reset = Date(timeIntervalSince1970: ts) }
+            else { reset = date(d["resets_at"]) }
+            u.limits.append(Limit(id: id, label: lbl, percent: Int(pct.rounded()),
+                                  resetsAt: reset, isActive: true, group: grp))
+        }
+        return u.limits.isEmpty ? nil : u
+    }
+
+    /// Combina ambas fuentes y devuelve la más reciente.
+    static func best() -> Usage? {
+        let a = fromClaudeJSON(), b = fromStatusLine()
+        switch (a, b) {
+        case let (x?, y?): return x.fetchedAt >= y.fetchedAt ? x : y
+        case let (x?, nil): return x
+        case let (nil, y?): return y
+        default: return nil
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARK: - Refresco manual vía CLI (SÍ consume 1 request)
+// ─────────────────────────────────────────────────────────────
+
+enum ClaudeRunner {
+    /// Fuerza a Claude Code a consultar el servidor, lo que reescribe el caché local.
+    static func forceRefresh() -> String? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        p.arguments = ["-c", #"export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"; claude -p "/usage" 2>&1"#]
+        p.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+        let pipe = Pipe()
+        p.standardOutput = pipe; p.standardError = pipe
+        do { try p.run() } catch { return "No pude lanzar el CLI: \(error.localizedDescription)" }
+
+        let watchdog = DispatchWorkItem { if p.isRunning { p.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 120, execute: watchdog)
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        p.waitUntilExit()
+        watchdog.cancel()
+
+        if p.terminationStatus != 0 {
+            let s = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            return s.isEmpty ? "El CLI salió con código \(p.terminationStatus)" : String(s.prefix(200))
+        }
+        return nil
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARK: - Vigilante de archivos (actualización instantánea, gratis)
+// ─────────────────────────────────────────────────────────────
+
+/// Observa un archivo y re-arma el watcher cuando lo reemplazan (escritura atómica).
+final class FileWatcher {
+    private var source: DispatchSourceFileSystemObject?
+    private var fd: Int32 = -1
+    private let url: URL
+    private let onChange: () -> Void
+    private var rearmScheduled = false
+
+    init(url: URL, onChange: @escaping () -> Void) {
+        self.url = url
+        self.onChange = onChange
+        arm()
+    }
+
+    private func arm() {
+        stop()
+        fd = open(url.path, O_EVTONLY)
+        guard fd >= 0 else { scheduleRearm(); return }
+        let s = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .rename, .delete, .extend],
+            queue: .main)
+        s.setEventHandler { [weak self] in
+            guard let self else { return }
+            let ev = s.data
+            self.onChange()
+            if ev.contains(.rename) || ev.contains(.delete) { self.scheduleRearm() }
+        }
+        s.setCancelHandler { [weak self] in
+            guard let self, self.fd >= 0 else { return }
+            close(self.fd); self.fd = -1
+        }
+        s.resume()
+        source = s
+    }
+
+    private func scheduleRearm() {
+        guard !rearmScheduled else { return }
+        rearmScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.rearmScheduled = false
+            self?.arm()
+            self?.onChange()
+        }
+    }
+
+    private func stop() {
+        source?.cancel()
+        source = nil
+    }
+
+    deinit { stop() }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARK: - Estado global
+// ─────────────────────────────────────────────────────────────
+
+@MainActor
+final class PetStore: ObservableObject {
+    static let shared = PetStore()
+
+    @Published private(set) var usage: Usage?
+    @Published private(set) var forcing = false
+    @Published private(set) var errorMsg: String?
+    @Published private(set) var bubble: String?
+    @Published private(set) var tick = Date()   // para refrescar los "hace X min"
+    @Published private(set) var activity: Activity = .idle
+
+    @Published var petVisible: Bool {
+        didSet {
+            UserDefaults.standard.set(petVisible, forKey: "petVisible")
+            onPetVisibilityChange?(petVisible)
+        }
+    }
+    @Published var notifyEnabled: Bool {
+        didSet { UserDefaults.standard.set(notifyEnabled, forKey: "notifyEnabled") }
+    }
+    /// Si está activo, Clawd se pinta del color del humor en vez de su naranja de marca.
+    @Published var tintClawd: Bool {
+        didSet { UserDefaults.standard.set(tintClawd, forKey: "tintClawd") }
+    }
+    /// Si está activo, cada tanto a Clawd le da por hacer algo.
+    @Published var activitiesEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(activitiesEnabled, forKey: "activitiesEnabled")
+            if activitiesEnabled { scheduleActivity() }
+            else { activityTimer?.invalidate(); activity = .idle }
+        }
+    }
+
+    /// Después de las 6 p.m. (y hasta las 6 a.m.) Clawd se pone el gorrito de dormir.
+    /// Cuelga de `tick` para que se refresque solo con el temporizador de lectura.
+    var isNight: Bool {
+        let h = Calendar.current.component(.hour, from: tick)
+        return h >= 18 || h < 6
+    }
+    /// Cada cuánto re-lee el archivo local. Es gratis, así que puede ser seguido.
+    @Published var pollSeconds: Int {
+        didSet {
+            UserDefaults.standard.set(pollSeconds, forKey: "pollSeconds")
+            scheduleTimer()
+        }
+    }
+
+    var onPetVisibilityChange: ((Bool) -> Void)?
+    var onRecenterPet: (() -> Void)?
+
+    private var timer: Timer?
+    private var activityTimer: Timer?
+    private var watchers: [FileWatcher] = []
+    private var bubbleTask: DispatchWorkItem?
+    private var lastNotifiedStep = -1
+    private var lastWorst = -1
+
+    var mood: Mood { usage == nil ? .broken : Mood.from(usage!.worst) }
+
+    private init() {
+        let d = UserDefaults.standard
+        petVisible    = d.object(forKey: "petVisible") as? Bool ?? true
+        notifyEnabled = d.object(forKey: "notifyEnabled") as? Bool ?? true
+        tintClawd     = d.object(forKey: "tintClawd") as? Bool ?? false
+        activitiesEnabled = d.object(forKey: "activitiesEnabled") as? Bool ?? true
+        pollSeconds   = d.object(forKey: "pollSeconds") as? Int ?? 60
+    }
+
+    func start() {
+        watchers = [
+            FileWatcher(url: LocalUsage.claudeJSON) { [weak self] in
+                Task { @MainActor in self?.reload() }
+            },
+            FileWatcher(url: LocalUsage.statusLineJSON) { [weak self] in
+                Task { @MainActor in self?.reload() }
+            },
+        ]
+        scheduleTimer()
+        if CommandLine.arguments.contains(where: { $0.hasPrefix("--demo") }) { startDemo() } else { scheduleActivity() }
+        reload(announce: true)
+    }
+
+    /// `--demo` recorre todas las actividades en bucle; `--demo=nap` fija una sola.
+    /// Sirve para verlas sin esperar a que le den ganas.
+    private func startDemo() {
+        activityTimer?.invalidate()
+
+        if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--demo=") }),
+           let one = Activity(rawValue: String(arg.dropFirst("--demo=".count))) {
+            activity = one
+            return
+        }
+
+        let all: [Activity] = [.idle, .coffee, .yawn, .dance, .workout, .nap, .apple]
+        var i = 0
+        activityTimer = Timer.scheduledTimer(withTimeInterval: 6, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.activity = all[i % all.count]
+                i += 1
+            }
+        }
+        activity = .idle
+    }
+
+    /// Programa la próxima ocurrencia. Los intervalos son largos a propósito:
+    /// la gracia es que sorprenda, no que esté haciendo cosas todo el rato.
+    private func scheduleActivity() {
+        activityTimer?.invalidate()
+        guard activitiesEnabled else { return }
+        let delay = Double.random(in: 45...150)
+        activityTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.startActivity() }
+        }
+    }
+
+    /// Lanza una actividad ahora. `forced` la dispara aunque estén desactivadas.
+    func startActivity(_ chosen: Activity? = nil, forced: Bool = false) {
+        guard activitiesEnabled || forced else { return }
+        let a = chosen ?? Activity.random(night: isNight)
+        activity = a
+        activityTimer?.invalidate()
+        activityTimer = Timer.scheduledTimer(withTimeInterval: a.duration, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.activity = .idle
+                self?.scheduleActivity()
+            }
+        }
+    }
+
+    private func scheduleTimer() {
+        timer?.invalidate()
+        let secs = Double(max(5, pollSeconds))
+        timer = Timer.scheduledTimer(withTimeInterval: secs, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.reload() }
+        }
+        timer?.tolerance = secs * 0.2
+    }
+
+    /// Lectura local: instantánea y sin costo.
+    func reload(announce: Bool = false) {
+        tick = Date()
+        guard let fresh = LocalUsage.best() else {
+            if usage == nil {
+                errorMsg = "Aún no hay datos locales. Abre Claude Code una vez y aparecerán."
+            }
+            return
+        }
+        errorMsg = nil
+        let changed = fresh != usage
+        let previousWorst = lastWorst
+        usage = fresh
+        lastWorst = fresh.worst
+
+        if announce || (changed && fresh.worst != previousWorst) {
+            say(mood.phrase(seed: fresh.worst &+ Int(fresh.fetchedAt.timeIntervalSince1970) / 97))
+            maybeNotify(new: fresh)
+        }
+    }
+
+    /// Único camino que gasta cuota, y solo si el usuario lo pide.
+    func forceRefresh() {
+        guard !forcing else { return }
+        forcing = true
+        say("Preguntándole al servidor… 📡")
+        Task.detached(priority: .utility) {
+            let err = ClaudeRunner.forceRefresh()
+            await MainActor.run {
+                self.forcing = false
+                if let err { self.errorMsg = err }
+                self.reload(announce: true)
+            }
+        }
+    }
+
+    func say(_ text: String, seconds: Double = 9) {
+        bubbleTask?.cancel()
+        bubble = text
+        let t = DispatchWorkItem { [weak self] in Task { @MainActor in self?.bubble = nil } }
+        bubbleTask = t
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: t)
+    }
+
+    /// Notifica solo al cruzar un umbral hacia arriba (50/70/90).
+    private func maybeNotify(new: Usage) {
+        guard notifyEnabled else { return }
+        let step: Int
+        switch new.worst {
+        case ..<50: step = 0
+        case ..<70: step = 1
+        case ..<90: step = 2
+        default:    step = 3
+        }
+        let previous = lastNotifiedStep
+        lastNotifiedStep = step
+        guard step > 0, step > previous, previous >= 0 || step >= 2 else { return }
+
+        let titles = ["", "Vas por la mitad", "Ojo con el consumo", "¡Cuota casi agotada!"]
+        let detail = new.limits.filter { $0.percent > 0 }
+            .map { "\($0.label.prefix(6)) \($0.percent)%" }.joined(separator: " · ")
+        notify(title: "\(mood.face) \(titles[step])",
+               body: detail.isEmpty ? "\(new.worst)% usado" : detail)
+    }
+
+    private func notify(title: String, body: String) {
+        func esc(_ s: String) -> String {
+            s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", "display notification \"\(esc(body))\" with title \"\(esc(title))\" sound name \"Submarine\""]
+        try? p.run()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARK: - Utilidades de formato
+// ─────────────────────────────────────────────────────────────
+
+enum Fmt {
+    static func ago(_ d: Date) -> String {
+        let s = Int(max(0, Date().timeIntervalSince(d)))
+        if s < 60 { return "hace \(s) s" }
+        if s < 3600 { return "hace \(s / 60) min" }
+        if s < 86400 { return "hace \(s / 3600) h" }
+        return "hace \(s / 86400) d"
+    }
+
+    static func reset(_ d: Date?) -> String {
+        guard let d else { return "" }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_CO")
+        f.dateFormat = Calendar.current.isDateInToday(d) ? "'hoy a las' h:mm a"
+                     : Calendar.current.isDateInTomorrow(d) ? "'mañana a las' h:mm a"
+                     : "EEEE d 'a las' h:mm a"
+        return f.string(from: d)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARK: - Componentes de UI
+// ─────────────────────────────────────────────────────────────
+
+/// Punto-anillo diminuto para la leyenda: anillo grueso = exterior (semana).
+struct RingKey: View {
+    let pct: Int
+    let label: String
+    var small = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Circle()
+                .stroke(Mood.from(pct).color, lineWidth: small ? 1.2 : 2.2)
+                .frame(width: 8, height: 8)
+            Text(label)
+        }
+    }
+}
+
+struct UsageBar: View {
+    let limit: Limit
+
+    private var mood: Mood { Mood.from(limit.percent) }
+    private var tint: Color { mood.color }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Text(limit.label).font(.system(size: 11, weight: .medium))
+                if limit.isActive {
+                    Circle().fill(tint).frame(width: 5, height: 5)
+                }
+                Spacer()
+                Text("\(limit.percent)%")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(mood.textColor)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.10))
+                    Capsule()
+                        .fill(LinearGradient(colors: [tint.opacity(0.65), tint],
+                                             startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(3, geo.size.width * CGFloat(min(limit.percent, 100)) / 100))
+                }
+            }
+            .frame(height: 7)
+            if let r = limit.resetsAt {
+                Text("se reinicia \(Fmt.reset(r))")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+        }
+        .animation(.easeOut(duration: 0.5), value: limit.percent)
+    }
+}
+
+/// Una capa de píxeles: su rejilla, su color y dónde va dentro del lienzo.
+struct PixelLayer {
+    let rows: [String]
+    let color: Color
+    var dx: Int = 0
+    var dy: Int = 0
+    var opacity: Double = 1
+    var shift: CGSize = .zero      // desplazamiento fino, en celdas
+}
+
+/// Dibuja capas de píxeles. Va con `Canvas` y no con vistas: son ~180 celdas y
+/// además el pixel-art no debe interpolar entre fotogramas.
+struct PixelCanvas: View {
+    let layers: [PixelLayer]
+    let cols: Int
+    let rowCount: Int
+    let cell: CGFloat
+
+    var body: some View {
+        Canvas { ctx, _ in
+            for layer in layers {
+                ctx.opacity = layer.opacity
+                for (r, line) in layer.rows.enumerated() {
+                    for (c, ch) in line.enumerated() where ch == "#" {
+                        let x = (CGFloat(layer.dx + c) + layer.shift.width) * cell
+                        let y = (CGFloat(layer.dy + r) + layer.shift.height) * cell
+                        // El +0.5 evita costuras finas entre celdas contiguas.
+                        ctx.fill(Path(CGRect(x: x, y: y, width: cell + 0.5, height: cell + 0.5)),
+                                 with: .color(layer.color))
+                    }
+                }
+            }
+        }
+        .frame(width: cell * CGFloat(cols), height: cell * CGFloat(rowCount))
+    }
+}
+
+/// Sprite pixel-art de Clawd, la mascota de Claude Code.
+/// La rejilla sale de `clawd.svg` de la extensión oficial (11 × 8 celdas, #D97757).
+enum Clawd {
+    static let cols = 11, rows = 8
+    static let brand = Color(red: 0xD9/255, green: 0x77/255, blue: 0x57/255)
+    static let brandNS = NSColor(red: 0xD9/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
+
+    /// Cuerpo sin los bracitos: esos van en capas aparte para poder moverlos solos.
+    static let body: [String] = [
+        ".#########.",
+        ".#########.",
+        ".#.#####.#.",   // ojos en las columnas 2 y 8
+        ".#########.",
+        ".#########.",
+        ".#########.",
+        ".#.#...#.#.",   // patas en las columnas 1, 3, 7 y 9
+        ".#.#...#.#.",
+    ]
+    static let eyeCols = [2, 8]
+
+    // ── Accesorios ───────────────────────────────────────────
+    static let capBody  = ["...........", "....#####..", "..######...", "..........."]
+    static let capTrim  = ["........##.", "...........", "...........", ".#########."]
+    static let mugBody  = ["###.", "####", "###."]
+    static let mugCoffee = ["###."]
+    static let apple    = ["..#.", ".###", "####", ".##."]
+    static let appleStem = ["..#."]
+    static let zed      = ["###", "..#", ".#.", "###"]
+
+    static let capColor   = Color(red: 0x4C/255, green: 0x63/255, blue: 0xC9/255)
+    static let capTrimCol = Color(red: 0xED/255, green: 0xED/255, blue: 0xF0/255)
+    static let mugColor   = Color(red: 0xEF/255, green: 0xEA/255, blue: 0xE3/255)
+    static let coffeeCol  = Color(red: 0x4A/255, green: 0x2C/255, blue: 0x17/255)
+    static let steamCol   = Color(red: 0xD8/255, green: 0xDE/255, blue: 0xE6/255)
+    static let appleCol   = Color(red: 0xD9/255, green: 0x3A/255, blue: 0x3A/255)
+    static let stemCol    = Color(red: 0x6B/255, green: 0x44/255, blue: 0x23/255)
+    static let zedCol     = Color(red: 0xC3/255, green: 0xCD/255, blue: 0xDB/255)
+
+    /// Rejilla del cuerpo con ojos, boca y patas según el estado.
+    static func bodyGrid(eyes: Eyes, mouth: Int, legLift: Int) -> [[Bool]] {
+        var g = body.map { $0.map { $0 == "#" } }
+
+        switch eyes {
+        case .open:   break
+        case .closed: for c in eyeCols { g[2][c] = true }
+        case .wide:   for c in eyeCols { g[1][c] = false }
+        }
+
+        switch mouth {
+        case 1: g[4][5] = false
+        case 2: for c in 4...6 { g[4][c] = false }
+        case 3: for c in 4...6 { g[4][c] = false; g[5][c] = false }
+        default: break
+        }
+
+        if legLift != 0 {
+            for c in (legLift > 0 ? [1, 7] : [3, 9]) { g[7][c] = false }
+        }
+        return g
+    }
+
+    enum Eyes { case open, closed, wide }
+
+    static func asRows(_ g: [[Bool]]) -> [String] {
+        g.map { String($0.map { $0 ? "#" : "." }) }
+    }
+
+    /// Imagen para la barra de menús (NSImage, origen abajo-izquierda).
+    private static var cache: [String: NSImage] = [:]
+    static func menuBarImage(color: NSColor, night: Bool, cell: CGFloat = 2) -> NSImage {
+        let key = "\(color.description)-\(night)-\(cell)"
+        if let c = cache[key] { return c }
+
+        let g = bodyGrid(eyes: .open, mouth: 0, legLift: 0)
+        var strokes: [(String, NSColor, Int, Int)] = []
+        // Brazos, que en el cuerpo van aparte
+        strokes.append(("#", color, 0, 2)); strokes.append(("#", color, 0, 3))
+        strokes.append(("#", color, 10, 2)); strokes.append(("#", color, 10, 3))
+
+        let totalRows = night ? rows + 3 : rows
+        let yShift = night ? 3 : 0
+        let img = NSImage(size: NSSize(width: cell * CGFloat(cols), height: cell * CGFloat(totalRows)))
+        img.lockFocus()
+
+        func put(_ c: Int, _ r: Int, _ col: NSColor) {
+            col.setFill()
+            NSRect(x: CGFloat(c) * cell,
+                   y: CGFloat(totalRows - 1 - r) * cell,
+                   width: cell, height: cell).fill()
+        }
+        if night {
+            for (r, line) in capBody.enumerated() {
+                for (c, ch) in line.enumerated() where ch == "#" { put(c, r, NSColor(capColor)) }
+            }
+            for (r, line) in capTrim.enumerated() {
+                for (c, ch) in line.enumerated() where ch == "#" { put(c, r, NSColor(capTrimCol)) }
+            }
+        }
+        for (r, row) in g.enumerated() {
+            for (c, on) in row.enumerated() where on { put(c, r + yShift, color) }
+        }
+        for (_, col, c, r) in strokes { put(c, r + yShift, col) }
+
+        img.unlockFocus()
+        cache[key] = img
+        return img
+    }
+}
+
+/// Clawd animado. En reposo solo flota y parpadea; de vez en cuando le da por
+/// hacer algo (café, siesta, baile…) y de noche se pone el gorrito.
+struct ClawdView: View {
+    let mood: Mood
+    let activity: Activity
+    let night: Bool
+    var clawdWidth: CGFloat = 44
+    var tinted = false
+
+    // Lienzo: deja sitio arriba para el gorrito y a la derecha para los accesorios.
+    private static let canvasCols = 15, canvasRows = 12
+    private static let clawdDX = 2, clawdDY = 4
+    private static let propDX = 10
+
+    @State private var blinking = false
+    @State private var beat = 0
+    @State private var float = false
+
+    private let beatTimer = Timer.publish(every: 0.22, on: .main, in: .common).autoconnect()
+    private let blinkTimer = Timer.publish(every: 3.4, on: .main, in: .common).autoconnect()
+
+    private var cell: CGFloat { clawdWidth / CGFloat(Clawd.cols) }
+    private var skin: Color { tinted ? mood.color : Clawd.brand }
+
+    // ── Estado de la cara y el cuerpo según la actividad ──────
+    private var sipping: Bool { beat % 9 >= 6 }
+    private var biting: Bool { beat % 8 >= 6 }
+
+    private var eyes: Clawd.Eyes {
+        if blinking { return .closed }
+        switch activity {
+        case .nap, .yawn:   return .closed
+        case .workout:      return .wide
+        default:
+            return (mood == .alert || mood == .panic) ? .wide : .open
+        }
+    }
+
+    private var mouth: Int {
+        switch activity {
+        case .yawn:    return 3
+        case .dance:   return 1
+        case .workout: return 2
+        case .coffee:  return sipping ? 1 : 0
+        case .apple:   return biting ? 2 : 0
+        case .nap:     return 1
+        case .idle:
+            switch mood {
+            case .ok: return 1
+            case .alert: return 2
+            case .panic: return 3
+            default: return 0
+            }
+        }
+    }
+
+    private var legLift: Int {
+        activity == .dance ? (beat % 2 == 0 ? 1 : -1) : 0
+    }
+
+    private var tilt: Double {
+        switch activity {
+        case .coffee: return sipping ? 9 : 0
+        case .dance:  return beat % 2 == 0 ? -11 : 11
+        default:      return 0
+        }
+    }
+
+    /// Desplazamiento del cuerpo, en celdas.
+    private var bodyShift: CGSize {
+        switch activity {
+        case .workout: return CGSize(width: 0, height: beat % 2 == 0 ? 0 : 1.1)
+        case .dance:   return CGSize(width: beat % 2 == 0 ? -0.5 : 0.5, height: 0)
+        case .nap:     return CGSize(width: 0, height: 0.8)
+        default:       return .zero
+        }
+    }
+
+    private var stretch: CGFloat { activity == .yawn ? 1.14 : 1 }
+
+    /// Altura de cada bracito, en celdas (negativo = arriba).
+    private func armShift(left: Bool) -> CGFloat {
+        switch activity {
+        case .dance:   return (left == (beat % 2 == 0)) ? -1 : 0.3
+        case .workout: return beat % 2 == 0 ? -1.2 : 0.3
+        case .coffee:  return left ? 0 : -0.8
+        case .apple:   return left ? 0 : -0.8
+        case .nap:     return 0.5
+        default:       return 0
+        }
+    }
+
+    // ── Capas ────────────────────────────────────────────────
+    private var clawdLayers: [PixelLayer] {
+        let g = Clawd.bodyGrid(eyes: eyes, mouth: mouth, legLift: legLift)
+        var out: [PixelLayer] = [
+            PixelLayer(rows: Clawd.asRows(g), color: skin,
+                       dx: Self.clawdDX, dy: Self.clawdDY, shift: bodyShift)
+        ]
+        for left in [true, false] {
+            let dx = Self.clawdDX + (left ? 0 : Clawd.cols - 1)
+            out.append(PixelLayer(rows: ["#", "#"], color: skin,
+                                  dx: dx, dy: Self.clawdDY + 2,
+                                  shift: CGSize(width: bodyShift.width,
+                                                height: bodyShift.height + armShift(left: left))))
+        }
+        return out
+    }
+
+    private var propLayers: [PixelLayer] {
+        switch activity {
+        case .coffee:
+            let steamCol = beat % 2 == 0 ? "#.." : ".#."
+            return [
+                PixelLayer(rows: [steamCol], color: Clawd.steamCol, dx: Self.propDX, dy: 4,
+                           opacity: 0.85),
+                PixelLayer(rows: Clawd.mugCoffee, color: Clawd.coffeeCol, dx: Self.propDX, dy: 6),
+                PixelLayer(rows: Clawd.mugBody, color: Clawd.mugColor, dx: Self.propDX, dy: 7),
+            ]
+        case .apple:
+            let bites = min(3, beat / 8)
+            var rows = Clawd.apple
+            if bites > 0 {
+                for r in 1...2 {
+                    var line = Array(rows[r])
+                    for k in 0..<bites where line.count - 1 - k >= 0 {
+                        line[line.count - 1 - k] = "."
+                    }
+                    rows[r] = String(line)
+                }
+            }
+            return [
+                PixelLayer(rows: Clawd.appleStem, color: Clawd.stemCol, dx: Self.propDX + 1, dy: 5),
+                PixelLayer(rows: rows, color: Clawd.appleCol, dx: Self.propDX + 1, dy: 6),
+            ]
+        case .nap:
+            let t = Double(beat % 12) / 12.0
+            return [
+                PixelLayer(rows: Clawd.zed, color: Clawd.zedCol, dx: Self.propDX, dy: 5,
+                           opacity: max(0, 1 - t * 0.8),
+                           shift: CGSize(width: t * 1.0, height: -t * 2.5)),
+                PixelLayer(rows: Clawd.zed, color: Clawd.zedCol, dx: Self.propDX - 1, dy: 7,
+                           opacity: max(0, 0.85 - t * 0.9),
+                           shift: CGSize(width: t * 0.7, height: -t * 1.8)),
+            ]
+        default:
+            return []
+        }
+    }
+
+    private var capLayers: [PixelLayer] {
+        guard night else { return [] }
+        return [
+            PixelLayer(rows: Clawd.capBody, color: Clawd.capColor,
+                       dx: Self.clawdDX, dy: Self.clawdDY - 3, shift: bodyShift),
+            PixelLayer(rows: Clawd.capTrim, color: Clawd.capTrimCol,
+                       dx: Self.clawdDX, dy: Self.clawdDY - 3, shift: bodyShift),
+        ]
+    }
+
+    var body: some View {
+        PixelCanvas(layers: clawdLayers + capLayers + propLayers,
+                    cols: Self.canvasCols, rowCount: Self.canvasRows, cell: cell)
+            .scaleEffect(x: 1, y: stretch, anchor: .bottom)
+            .rotationEffect(.degrees(tilt))
+            // Centra a Clawd (no el lienzo) dentro del anillo.
+            .offset(x: cell * 0.5, y: -cell * 1.5)
+            .offset(y: float ? -cell * 0.3 : cell * 0.3)
+            .animation(.easeInOut(duration: 0.18), value: beat)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) {
+                    float = true
+                }
+            }
+            .onReceive(beatTimer) { _ in
+                if activity != .idle { beat &+= 1 } else if beat != 0 { beat = 0 }
+            }
+            .onReceive(blinkTimer) { _ in
+                guard mood != .broken, activity != .nap else { return }
+                blinking = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { blinking = false }
+            }
+    }
+}
+/// Un anillo de progreso: pista tenue + arco de color.
+struct ProgressRing: View {
+    let pct: Int
+    let lineWidth: CGFloat
+    var inset: CGFloat = 0
+
+    private var color: Color { Mood.from(pct).color }
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.primary.opacity(0.13), lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0, to: CGFloat(min(pct, 100)) / 100)
+                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.7), value: pct)
+        }
+        .padding(inset)
+    }
+}
+
+/// Clawd entre dos anillos concéntricos: el exterior es la semana, el interior la sesión.
+struct MascotView: View {
+    let mood: Mood
+    let weekPct: Int
+    let sessionPct: Int
+    let busy: Bool
+    var activity: Activity = .idle
+    var night = false
+    var size: CGFloat = 64
+    var showRing = true
+    var backdrop = false
+    var tinted = false
+
+    @State private var spin = 0.0
+
+    private var outerWidth: CGFloat { size * 0.072 }
+    private var innerWidth: CGFloat { size * 0.056 }
+    private var innerInset: CGFloat { size * 0.105 }
+
+    var body: some View {
+        ZStack {
+            if backdrop {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
+                    .padding(size * 0.028)
+            }
+            if showRing {
+                ProgressRing(pct: weekPct, lineWidth: outerWidth)
+                ProgressRing(pct: sessionPct, lineWidth: innerWidth, inset: innerInset)
+            }
+            if busy {
+                Circle()
+                    .trim(from: 0, to: 0.18)
+                    .stroke(mood.color.opacity(0.9),
+                            style: StrokeStyle(lineWidth: outerWidth, lineCap: .round))
+                    .rotationEffect(.degrees(spin))
+            }
+            // Clawd tiene que caber DENTRO del anillo interior, de ahí el 0.48.
+            ClawdView(mood: mood, activity: activity, night: night,
+                      clawdWidth: size * 0.48, tinted: tinted)
+        }
+        .frame(width: size, height: size)
+        .onAppear {
+            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { spin = 360 }
+        }
+    }
+}
+
+struct Bubble: View {
+    let text: String
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(text)
+                .font(.system(size: 11, weight: .medium))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(.regularMaterial)
+                        .shadow(color: .black.opacity(0.18), radius: 6, y: 2))
+            Triangle().fill(.regularMaterial).frame(width: 12, height: 7)
+        }
+        .frame(maxWidth: 170)
+    }
+}
+
+struct Triangle: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.midX, y: r.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARK: - Panel de la barra de menús
+// ─────────────────────────────────────────────────────────────
+
+struct PanelView: View {
+    @ObservedObject var store = PetStore.shared
+
+    private let pollOptions: [(Int, String)] = [
+        (15, "cada 15 s"), (30, "cada 30 s"), (60, "cada minuto"),
+        (300, "cada 5 min"), (900, "cada 15 min"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+
+            HStack(alignment: .center, spacing: 12) {
+                MascotView(mood: store.mood,
+                           weekPct: store.usage?.weekPct ?? 0,
+                           sessionPct: store.usage?.sessionPct ?? 0,
+                           busy: store.forcing,
+                           activity: store.activity, night: store.isNight,
+                           size: 66, tinted: store.tintClawd)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Claude Pet")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                    Text(store.bubble ?? store.mood.phrase(seed: store.usage?.worst ?? 0))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 4) {
+                        RingKey(pct: store.usage?.weekPct ?? 0, label: "semana")
+                        Text("·").foregroundStyle(.quaternary)
+                        RingKey(pct: store.usage?.sessionPct ?? 0, label: "sesión", small: true)
+                    }
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+
+            if let err = store.errorMsg {
+                Text(err)
+                    .font(.system(size: 10)).foregroundStyle(.orange)
+                    .lineLimit(4).padding(7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.orange.opacity(0.10)))
+            }
+
+            if let u = store.usage {
+                VStack(spacing: 11) {
+                    if let s = u.session { UsageBar(limit: s) }
+                    if let w = u.weekly  { UsageBar(limit: w) }
+                    ForEach(u.scoped) { UsageBar(limit: $0) }
+                }
+
+                // Frescura del dato — clave, porque el caché solo se actualiza al usar Claude Code.
+                HStack(spacing: 5) {
+                    Image(systemName: u.age > 3600 ? "clock.badge.exclamationmark" : "clock")
+                    Text("dato de \(Fmt.ago(u.fetchedAt))")
+                    Text("·").foregroundStyle(.tertiary)
+                    Text(u.source).foregroundStyle(.tertiary)
+                }
+                .font(.system(size: 9))
+                .foregroundStyle(u.age > 3600 ? .orange : .secondary)
+                .id(store.tick)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Text("Releer archivo local").font(.system(size: 11))
+                    Picker("", selection: $store.pollSeconds) {
+                        ForEach(pollOptions, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                    .labelsHidden().controlSize(.small)
+                }
+                Toggle("Mascota en el escritorio", isOn: $store.petVisible)
+                Toggle("Avisarme al cruzar 50/70/90 %", isOn: $store.notifyEnabled)
+                Toggle("Clawd cambia de color con el humor", isOn: $store.tintClawd)
+                Toggle("Actividades: café, siesta, baile…", isOn: $store.activitiesEnabled)
+                HStack(spacing: 10) {
+                    Button("Que haga algo ahora 🎲") { store.startActivity(forced: true) }
+                        .buttonStyle(.link).font(.system(size: 10))
+                    if store.isNight {
+                        Text("🌙 modo noche").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    }
+                }
+                if store.petVisible {
+                    Button("Traer a Clawd a esta pantalla") {
+                        store.onRecenterPet?()
+                    }
+                    .buttonStyle(.link).font(.system(size: 10))
+                }
+            }
+            .toggleStyle(.switch).controlSize(.mini).font(.system(size: 11))
+
+            Label("Leer el archivo local no consume nada de tu cuota.",
+                  systemImage: "leaf.fill")
+                .font(.system(size: 9)).foregroundStyle(Mood.chill.textColor)
+
+            Divider()
+
+            HStack(spacing: 8) {
+                Button {
+                    store.forceRefresh()
+                } label: {
+                    Label(store.forcing ? "Consultando…" : "Forzar (1 request)",
+                          systemImage: "antenna.radiowaves.left.and.right")
+                }
+                .disabled(store.forcing).controlSize(.small)
+                .help("Ejecuta `claude -p \"/usage\"`. Esto SÍ gasta un request de tu cuota.")
+
+                Spacer()
+
+                Button("Salir") { NSApplication.shared.terminate(nil) }
+                    .controlSize(.small)
+            }
+        }
+        .padding(15)
+        .frame(width: 306)
+        .animation(.easeInOut(duration: 0.25), value: store.bubble)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARK: - Mascota flotante en el escritorio
+// ─────────────────────────────────────────────────────────────
+
+struct DesktopPetView: View {
+    @ObservedObject var store = PetStore.shared
+    @State private var hovering = false
+
+    private var hoverText: String {
+        guard let u = store.usage else { return "Sin datos todavía" }
+        let parts = [u.session, u.weekly].compactMap { $0 }
+            .map { "\($0.label.hasPrefix("Sesión") ? "Sesión" : "Semana") \($0.percent)%" }
+        return parts.joined(separator: " · ") + "\n\(Fmt.ago(u.fetchedAt))"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                if let b = store.bubble { Bubble(text: b) }
+                else if hovering { Bubble(text: hoverText) }
+            }
+            .frame(height: 66, alignment: .bottom)
+
+            MascotView(mood: store.mood,
+                       weekPct: store.usage?.weekPct ?? 0,
+                       sessionPct: store.usage?.sessionPct ?? 0,
+                       busy: store.forcing,
+                       activity: store.activity, night: store.isNight,
+                       size: 96, backdrop: true, tinted: store.tintClawd)
+                .contentShape(Circle())
+                .onTapGesture { store.reload(announce: true) }
+                .help("Clic: releer · Arrastra para mover")
+
+            Text("\(store.usage?.sessionPct ?? 0)/\(store.usage?.weekPct ?? 0)%")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 2.5)
+                .background(
+                    Capsule()
+                        .fill(store.mood.deep)
+                        .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.5))
+                )
+                .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
+                .offset(y: -2)
+        }
+        .padding(.horizontal, 6)
+        .padding(.bottom, 4)
+        .frame(width: PetPanel.petSize.width, height: PetPanel.petSize.height)
+        .onHover { hovering = $0 }
+        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: store.bubble)
+        .animation(.easeInOut(duration: 0.2), value: hovering)
+    }
+}
+
+final class PetPanel: NSPanel {
+    static let petSize = CGSize(width: 200, height: 192)
+
+    init() {
+        super.init(contentRect: NSRect(origin: .zero, size: Self.petSize),
+                   styleMask: [.borderless, .nonactivatingPanel],
+                   backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        level = .floating
+        isMovableByWindowBackground = true
+        hidesOnDeactivate = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+
+        let host = NSHostingView(rootView: DesktopPetView())
+        host.wantsLayer = true
+        host.layer?.backgroundColor = .clear
+        contentView = host
+
+        setFrameAutosaveName("ClaudePetWindow")
+        // El autosave puede restaurar un tamaño viejo o una posición en una pantalla
+        // que ya no está conectada; forzamos el tamaño y validamos la posición.
+        setContentSize(Self.petSize)
+        if frame.origin == .zero || !isOnAnyScreen { recenter() }
+    }
+
+    /// ¿La ventana queda dentro de alguna pantalla conectada?
+    private var isOnAnyScreen: Bool {
+        NSScreen.screens.contains { $0.visibleFrame.intersects(frame) }
+    }
+
+    /// La lleva abajo a la derecha de la pantalla principal.
+    func recenter() {
+        guard let vis = NSScreen.main?.visibleFrame else { return }
+        setContentSize(Self.petSize)
+        setFrameOrigin(NSPoint(x: vis.maxX - Self.petSize.width - 24,
+                               y: vis.minY + 24))
+    }
+
+    override var canBecomeKey: Bool { false }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MARK: - App
+// ─────────────────────────────────────────────────────────────
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var panel: PetPanel?
+
+    func applicationDidFinishLaunching(_ n: Notification) {
+        if CommandLine.arguments.contains("--dump") { Self.dumpAndExit() }
+        NSApp.setActivationPolicy(.accessory)
+        let store = PetStore.shared
+        store.onPetVisibilityChange = { [weak self] v in
+            Task { @MainActor in self?.setPet(v) }
+        }
+        store.onRecenterPet = { [weak self] in
+            Task { @MainActor in
+                self?.setPet(true)
+                self?.panel?.recenter()
+            }
+        }
+        setPet(store.petVisible)
+        store.start()
+    }
+
+    /// Modo diagnóstico: `ClaudePet.app/Contents/MacOS/ClaudePet --dump`
+    static func dumpAndExit() -> Never {
+        print("claude.json  :", LocalUsage.fromClaudeJSON() != nil ? "OK" : "no disponible")
+        print("statusLine   :", LocalUsage.fromStatusLine() != nil ? "OK" : "no configurado")
+        if let u = LocalUsage.best() {
+            print("fuente elegida:", u.source, "|", Fmt.ago(u.fetchedAt))
+            for l in u.limits {
+                print(String(format: "  %-32@ %3d%%  activo=%@  reinicio=%@",
+                             l.label as NSString, l.percent,
+                             l.isActive ? "sí" : "no",
+                             Fmt.reset(l.resetsAt) as NSString))
+            }
+            print("peor =", u.worst, "→ humor", Mood.from(u.worst).face)
+        } else {
+            print("SIN DATOS")
+        }
+        exit(0)
+    }
+
+    @MainActor private func setPet(_ visible: Bool) {
+        if visible {
+            if panel == nil { panel = PetPanel() }
+            panel?.orderFrontRegardless()
+        } else {
+            panel?.orderOut(nil)
+        }
+    }
+}
+
+@main
+struct ClaudePetApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    @ObservedObject var store = PetStore.shared
+
+    var body: some Scene {
+        MenuBarExtra {
+            PanelView()
+        } label: {
+            let tint = store.tintClawd ? NSColor(store.mood.color) : Clawd.brandNS
+            HStack(spacing: 4) {
+                Image(nsImage: Clawd.menuBarImage(color: tint, night: store.isNight))
+                if let u = store.usage { Text("\(u.sessionPct)/\(u.weekPct)%") }
+            }
+        }
+        .menuBarExtraStyle(.window)
+    }
+}
