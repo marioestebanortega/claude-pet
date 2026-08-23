@@ -1743,6 +1743,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         if CommandLine.arguments.contains("--dump") { Self.dumpAndExit() }
+        if CommandLine.arguments.contains("--dump-raw") { Self.dumpRawAndExit() }
         if CommandLine.arguments.contains("--login-on")  { Self.setLoginAndExit(true) }
         if CommandLine.arguments.contains("--login-off") { Self.setLoginAndExit(false) }
         NSApp.setActivationPolicy(.accessory)
@@ -1780,6 +1781,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .notFound:         return "no encontrado"
         @unknown default:       return "desconocido"
         }
+    }
+
+    /// Vuelca el bloque de cuota tal cual, quitando lo que identifica a la cuenta.
+    /// Sirve para diagnosticar planes que no puedo probar (Team, Enterprise) sin
+    /// pedirle a nadie que comparta su archivo entero.
+    static func dumpRawAndExit() -> Never {
+        guard let data = try? Data(contentsOf: LocalUsage.claudeJSON),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cached = root["cachedUsageUtilization"] as? [String: Any]
+        else {
+            print("No encontré cachedUsageUtilization en \(LocalUsage.claudeJSON.path)")
+            exit(1)
+        }
+
+        /// Fuera cualquier cosa que huela a identificador o credencial.
+        func redact(_ value: Any) -> Any {
+            if var dict = value as? [String: Any] {
+                for key in dict.keys {
+                    let k = key.lowercased()
+                    if ["uuid", "id", "email", "token", "key", "secret", "account", "org"]
+                        .contains(where: { k.contains($0) }) {
+                        dict[key] = "«omitido»"
+                    } else {
+                        dict[key] = redact(dict[key]!)
+                    }
+                }
+                return dict
+            }
+            if let arr = value as? [Any] { return arr.map(redact) }
+            return value
+        }
+
+        var out: [String: Any] = ["utilization": redact(cached["utilization"] ?? [:])]
+        out["tier"] = (root["oauthAccount"] as? [String: Any])?["organizationRateLimitTier"] ?? "?"
+        out["hasOAuthAccount"] = root["oauthAccount"] != nil
+
+        if let json = try? JSONSerialization.data(withJSONObject: out,
+                                                  options: [.prettyPrinted, .sortedKeys]),
+           let text = String(data: json, encoding: .utf8) {
+            print(text)
+        }
+        exit(0)
     }
 
     /// Modo diagnóstico: `ClaudePet.app/Contents/MacOS/ClaudePet --dump`

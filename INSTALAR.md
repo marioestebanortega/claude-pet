@@ -21,6 +21,19 @@ Para verificarlo en cualquier momento:
 ClaudePet.app/Contents/MacOS/ClaudePet --dump
 ```
 
+### Diagnóstico en planes Team y Enterprise
+
+Esos planes se miden en dinero y no he podido probarlos con datos reales. Si algo
+no cuadra, este comando vuelca el bloque de cuota **quitando todo lo que identifica
+a la cuenta** (UUID, correos, tokens, ids), para poder compartirlo sin exponer nada:
+
+```bash
+ClaudePet.app/Contents/MacOS/ClaudePet --dump-raw
+```
+
+Salen unos 3 KB. Repasa la salida antes de mandarla: lleva tus porcentajes de uso y,
+si el plan va por dinero, los importes.
+
 ---
 
 ## Opción A — compilarla (recomendada)
