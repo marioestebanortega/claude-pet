@@ -279,6 +279,14 @@ enum LocalUsage {
         return u.limits.isEmpty ? nil : u
     }
 
+    /// Fecha de modificación de cada fuente. Sirve para no re-parsear en balde:
+    /// un `stat` cuesta nada, y así el sondeo puede ser frecuente sin pesar.
+    static func stamps() -> [Date?] {
+        [claudeJSON, statusLineJSON].map { url in
+            (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        }
+    }
+
     /// ¿Claude Code está corriendo ahora?
     ///
     /// Se deduce del mtime de los dos archivos: Claude Code reescribe
@@ -349,7 +357,6 @@ enum ClaudeRunner {
 /// Observa un archivo y re-arma el watcher cuando lo reemplazan (escritura atómica).
 final class FileWatcher {
     private var source: DispatchSourceFileSystemObject?
-    private var fd: Int32 = -1
     private let url: URL
     private let onChange: () -> Void
     private var rearmScheduled = false
@@ -361,23 +368,30 @@ final class FileWatcher {
     }
 
     private func arm() {
-        stop()
-        fd = open(url.path, O_EVTONLY)
-        guard fd >= 0 else { scheduleRearm(); return }
+        // Cancelar la fuente anterior ANTES de abrir el descriptor nuevo. Su
+        // handler de cancelación cierra el fd que capturó, no uno leído después:
+        // como el handler corre en la cola principal, si leyera una propiedad
+        // `self.fd` la encontraría ya apuntando al descriptor nuevo y lo cerraría,
+        // matando el vigilante en el primer reemplazo del archivo.
+        source?.cancel()
+        source = nil
+
+        let newFD = open(url.path, O_EVTONLY)
+        guard newFD >= 0 else { scheduleRearm(); return }
+
         let s = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd,
+            fileDescriptor: newFD,
             eventMask: [.write, .rename, .delete, .extend],
             queue: .main)
-        s.setEventHandler { [weak self] in
-            guard let self else { return }
+        s.setEventHandler { [weak self, weak s] in
+            guard let self, let s else { return }
             let ev = s.data
             self.onChange()
+            // Escritura atómica (`os.replace`): el inodo vigilado desaparece y
+            // hay que volver a engancharse al archivo nuevo.
             if ev.contains(.rename) || ev.contains(.delete) { self.scheduleRearm() }
         }
-        s.setCancelHandler { [weak self] in
-            guard let self, self.fd >= 0 else { return }
-            close(self.fd); self.fd = -1
-        }
+        s.setCancelHandler { close(newFD) }
         s.resume()
         source = s
     }
@@ -385,19 +399,15 @@ final class FileWatcher {
     private func scheduleRearm() {
         guard !rearmScheduled else { return }
         rearmScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-            self?.rearmScheduled = false
-            self?.arm()
-            self?.onChange()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else { return }
+            self.rearmScheduled = false
+            self.arm()
+            self.onChange()
         }
     }
 
-    private func stop() {
-        source?.cancel()
-        source = nil
-    }
-
-    deinit { stop() }
+    deinit { source?.cancel() }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -560,6 +570,7 @@ final class PetStore: ObservableObject {
     private var timer: Timer?
     private var activityTimer: Timer?
     private var syncingLogin = false
+    private var lastStamps: [Date?] = []
     private var watchers: [FileWatcher] = []
     private var bubbleTask: DispatchWorkItem?
     private var lastNotifiedStep = -1
@@ -576,7 +587,9 @@ final class PetStore: ObservableObject {
         // La verdad la tiene el sistema, no UserDefaults: el usuario pudo quitarlo
         // a mano desde Ajustes y hay que reflejarlo.
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        pollSeconds   = d.object(forKey: "pollSeconds") as? Int ?? 60
+        // El vigilante de archivos ya avisa al instante; esto es la red de
+        // seguridad. Como leer cuesta ~0 ms, no hay motivo para espaciarlo.
+        pollSeconds   = d.object(forKey: "pollSeconds") as? Int ?? 10
     }
 
     func start() {
@@ -656,7 +669,7 @@ final class PetStore: ObservableObject {
 
     private func scheduleTimer() {
         timer?.invalidate()
-        let secs = Double(max(5, pollSeconds))
+        let secs = Double(max(2, pollSeconds))
         timer = Timer.scheduledTimer(withTimeInterval: secs, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.reload() }
         }
@@ -664,9 +677,15 @@ final class PetStore: ObservableObject {
     }
 
     /// Lectura local: instantánea y sin costo.
-    func reload(announce: Bool = false) {
+    func reload(announce: Bool = false, force: Bool = false) {
         tick = Date()
         claudeActive = LocalUsage.claudeCodeActive()
+
+        // Si ningún archivo se ha tocado, no hay nada que releer.
+        let stamps = LocalUsage.stamps()
+        if !force, !announce, usage != nil, stamps == lastStamps { return }
+        lastStamps = stamps
+
         guard let fresh = LocalUsage.best() else {
             if usage == nil {
                 errorMsg = "Aún no hay datos locales. Abre Claude Code una vez y aparecerán."
@@ -1255,8 +1274,8 @@ struct PanelView: View {
     @ObservedObject var notifier = Notifier.shared
 
     private let pollOptions: [(Int, String)] = [
-        (15, "cada 15 s"), (30, "cada 30 s"), (60, "cada minuto"),
-        (300, "cada 5 min"), (900, "cada 15 min"),
+        (5, "cada 5 s"), (10, "cada 10 s"), (30, "cada 30 s"),
+        (60, "cada minuto"), (300, "cada 5 min"),
     ]
 
     var body: some View {
@@ -1415,7 +1434,7 @@ struct DesktopPetView: View {
 
         Divider()
 
-        Button("Actualizar ahora") { store.reload(announce: true) }
+        Button("Actualizar ahora") { store.reload(announce: true, force: true) }
         Button("Que haga algo 🎲") { store.startActivity(forced: true) }
         Toggle("Actividades automáticas", isOn: $store.activitiesEnabled)
 
@@ -1452,7 +1471,7 @@ struct DesktopPetView: View {
                        activity: store.activity, night: store.isNight,
                        size: 96, backdrop: true, tinted: store.tintClawd)
                 .contentShape(Circle())
-                .onTapGesture { store.reload(announce: true) }
+                .onTapGesture { store.reload(announce: true, force: true) }
                 .help("Clic: releer · Clic derecho: opciones · Arrastra para mover")
                 .contextMenu { petMenu }
 

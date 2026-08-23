@@ -18,7 +18,13 @@ Lee los datos de un **caché local** que Claude Code ya escribe en tu Mac:
 | Botón «Forzar» → `claude -p "/usage"` | **1 request** | solo si tú lo pulsas |
 
 La app usa siempre la fuente **más reciente** de las dos gratuitas, con un
-*file watcher* que reacciona al instante cuando el archivo cambia.
+*file watcher* que reacciona en menos de un segundo, más un sondeo cada 10 s como red
+de seguridad (leer cuesta ~0 ms, y solo re-parsea si cambió el `mtime`).
+
+> El watcher tiene una trampa que costó un bug: al re-armarse tras una escritura
+> atómica, el handler de cancelación de la fuente vieja **no puede leer una propiedad
+> `fd`**. Corre en la cola principal, o sea después de que `fd` ya apunta al descriptor
+> nuevo, y lo cierra. Hay que capturar el descriptor propio en el closure.
 
 ### Frescura del dato — instala el hook
 
