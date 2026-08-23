@@ -49,6 +49,104 @@ def _icon(args: list[str]) -> int:
     return 0
 
 
+HOOK = "statusline-pet.py"
+
+
+def _hook_source() -> str | None:
+    """El hook vive fuera del paquete Python: en /usr/lib/claudepet cuando se
+    instala por .deb, y en la raíz del repo cuando se ejecuta desde el fuente."""
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    for rel in ("..", os.path.join("..", "..")):
+        path = os.path.normpath(os.path.join(here, rel, HOOK))
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _install_statusline(args: list[str]) -> int:
+    """Pone (o quita) el hook de statusLine, que es la fuente de datos fresca.
+
+    `~/.claude.json` se refresca muy de tarde en tarde; el hook escribe cada
+    pocos segundos y además funde las cifras de todas las sesiones abiertas.
+    No importa GTK a propósito, igual que `--dump`: tiene que funcionar en una
+    máquina sin escritorio.
+    """
+    import json
+    import os
+    import shutil
+    import time
+
+    claude = os.path.expanduser("~/.claude")
+    dst = os.path.join(claude, HOOK)
+    settings = os.path.join(claude, "settings.json")
+
+    cfg = {}
+    if os.path.exists(settings):
+        try:
+            with open(settings) as f:
+                cfg = json.load(f)
+        except ValueError:
+            print(f"⚠️  {settings} no es JSON válido. No lo toco.", file=sys.stderr)
+            return 1
+        if not isinstance(cfg, dict):
+            print(f"⚠️  {settings} no contiene un objeto. No lo toco.", file=sys.stderr)
+            return 1
+
+    def backup() -> None:
+        if os.path.exists(settings):
+            shutil.copyfile(settings, f"{settings}.bak.{int(time.time())}")
+
+    def write() -> None:
+        with open(settings, "w") as f:
+            json.dump(cfg, f, indent=2)
+
+    old = cfg.get("statusLine") or {}
+    mine = str(old.get("command", "")).endswith(HOOK)
+
+    if "off" in args:
+        if mine:
+            backup()
+            cfg.pop("statusLine")
+            write()
+            print("✅ statusLine quitado.")
+        elif old:
+            print("ℹ️  El statusLine configurado no es el de Claude Pet; lo dejo.")
+        else:
+            print("ℹ️  No estaba puesto.")
+        for path in (dst, os.path.join(claude, "pet-usage.json")):
+            if os.path.exists(path):
+                os.remove(path)
+                print("🗑 ", path)
+        return 0
+
+    src = _hook_source()
+    if src is None:
+        print(f"No encuentro {HOOK}. Si instalaste por .deb debería estar en "
+              "/usr/lib/claudepet/.", file=sys.stderr)
+        return 1
+
+    if old and not mine:
+        print(f"⚠️  Ya tenías un statusLine configurado:\n    {old.get('command')}\n"
+              "    Se guarda copia del settings.json antes de reemplazarlo.")
+
+    os.makedirs(claude, exist_ok=True)
+    shutil.copyfile(src, dst)
+    os.chmod(dst, 0o755)
+    backup()
+    cfg["statusLine"] = {
+        "type": "command",
+        "command": f"python3 {dst}",
+        # Sin esto la línea de estado solo se re-ejecuta tras cada mensaje del
+        # asistente: si dejas Claude Code quieto, el dato de cuota se congela.
+        "refreshInterval": 10,
+        "padding": 1,
+    }
+    write()
+    print("✅ statusLine instalado. Reinicia Claude Code para verlo.")
+    return 0
+
+
 def _pet_png(args: list[str]) -> int:
     """Vuelca la mascota a PNG sin necesitar pantalla, para poder compararla
     con docs/mascota-flotante.png."""
@@ -101,11 +199,14 @@ def main() -> int:
         return _icon([a for a in args if a != "--icon"])
     if "--pet-png" in args:
         return _pet_png([a for a in args if a != "--pet-png"])
+    if "--install-statusline" in args:
+        return _install_statusline([a for a in args if a != "--install-statusline"])
     if "--help" in args or "-h" in args:
         print(__doc__)
         print("  --dump              muestra el consumo y sale (no necesita GTK)")
         print("  --icon [ruta]       escribe el PNG de Clawd  [--night] [--tint]")
         print("  --autostart [off]   arrancar al iniciar sesión")
+        print("  --install-statusline [off]  pone el hook que da el dato fresco")
         print("  --pet               solo la mascota flotante, sin bandeja")
         print("  --no-pet            solo la bandeja, sin mascota")
         print("  --pet-png [ruta]    vuelca la mascota a PNG  [--night] [--scale=N]")
