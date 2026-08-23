@@ -152,6 +152,14 @@ python3 linux/build-deb.py
 Funciona **desde cualquier sistema, incluido un Mac**: el formato `ar` del `.deb` se
 escribe a mano en vez de llamar a `dpkg-deb`.
 
+## Por qué la mascota se mueve a saltos
+
+Porque moverse suave se paga a precio de reloj. En macOS, un vaivén interpolado de
+±1,3 px costaba el 12 % de un núcleo todo el rato, y bajarlo a 15 fps no ayudaba: el
+suelo de cualquier movimiento continuo era ~4 %. Aquí ya se hace bien — `_breathe()`
+alterna dos posiciones cada 1,7 s y no interpola nada — pero conviene saber por qué,
+para no «mejorarlo»: [`docs/animacion-y-cpu-ubuntu.md`](../docs/animacion-y-cpu-ubuntu.md).
+
 ## Qué comparte con la versión de macOS
 
 Todo el criterio, verificado dando las mismas cifras:
