@@ -5,6 +5,11 @@ de macOS, reescrito en Python: **la app de macOS no se puede portar**, sus cinco
 frameworks (SwiftUI, AppKit, Combine, UserNotifications, ServiceManagement) son
 exclusivos de Darwin.
 
+> **Pendiente: la mascota flotante.** En macOS Clawd también vive suelto en el
+> escritorio; en Linux todavía no. El encargo completo, con la especificación visual y
+> la imagen de referencia, está en
+> [`docs/mascota-flotante-ubuntu.md`](../docs/mascota-flotante-ubuntu.md).
+
 ## Instalar en Ubuntu
 
 ```bash
