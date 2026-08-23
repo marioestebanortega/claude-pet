@@ -30,15 +30,44 @@ struct Usage: Equatable {
     /// Todo lo demás que traiga el plan: modelos concretos, gasto en dólares,
     /// créditos mensuales, o dimensiones que aún no existían al escribir esto.
     /// Se ocultan las que están a cero y sin cifra, que solo serían ruido.
-    var others: [Limit] {
+    private var extra: [Limit] {
         limits.filter { l in
             l.id != "session" && l.id != "weekly_all"
                 && (l.percent > 0 || l.detail != nil || l.isActive)
         }
     }
 
-    var sessionPct: Int { session?.percent ?? 0 }
-    var weekPct: Int { weekly?.percent ?? 0 }
+    /// Team/Enterprise no traen "session"/"weekly_all": ahí se cae a las dos
+    /// dimensiones con más porcentaje de lo que sí trajo el plan (gasto, créditos…)
+    /// en vez de mostrar 0/0% con la cuota real en 2%.
+    private var fallbackTop: [Limit] { extra.sorted { $0.percent > $1.percent } }
+
+    var sessionPct: Int { session?.percent ?? fallbackTop.first?.percent ?? 0 }
+    var weekPct: Int { weekly?.percent ?? fallbackTop.dropFirst().first?.percent ?? 0 }
+
+    var sessionLabel: String { session != nil ? "sesión" : (fallbackTop.first?.label ?? "sesión") }
+    var weekLabel: String { weekly != nil ? "semana" : (fallbackTop.dropFirst().first?.label ?? "semana") }
+
+    /// "US$ 3,03 de US$ 150": solo lo traen los planes que se miden en dinero.
+    var sessionDetail: String? { session?.detail ?? fallbackTop.first?.detail }
+
+    /// true si hay una segunda ventana real que mostrar (semana en Pro/Max, o una
+    /// segunda bolsa de crédito distinta en Team/Enterprise). Con una sola
+    /// dimensión, la UI compacta muestra un solo número en vez de inventar una
+    /// "semana" en 0% que no existe.
+    var hasSecondary: Bool { weekly != nil || fallbackTop.dropFirst().first != nil }
+
+    /// Texto del badge/barra de menú: "sesión/semana" cuando hay dos ventanas
+    /// reales, un solo número cuando el plan solo separa una (Team/Enterprise).
+    var compactText: String { hasSecondary ? "\(sessionPct)/\(weekPct)%" : "\(sessionPct)%" }
+
+    /// Lista larga del panel: todo lo extra, salvo lo que ya se repite arriba
+    /// como sesión/semana de repuesto.
+    var others: [Limit] {
+        guard session == nil, weekly == nil else { return extra }
+        let shown = Set(fallbackTop.prefix(2).map(\.id))
+        return extra.filter { !shown.contains($0.id) }
+    }
 
     /// El número que define el humor: lo más crítico de todo.
     var worst: Int { limits.map(\.percent).max() ?? 0 }
@@ -321,42 +350,51 @@ enum LocalUsage {
     /// En una suscripción Pro/Max vienen vacíos y no se dibuja nada; en Team y
     /// Enterprise son la métrica que de verdad importa.
     private static func spendLimits(_ util: [String: Any]) -> [Limit] {
-        var out: [Limit] = []
-
-        if let sp = util["spend"] as? [String: Any] {
-            let used = minor(sp["used"] as? [String: Any])
-            let cap = minor(sp["limit"] as? [String: Any]) ?? minor(sp["cap"] as? [String: Any])
-            let pct = Int((sp["percent"] as? Double) ?? 0)
-            let currency = (sp["used"] as? [String: Any])?["currency"] as? String
-            if cap != nil || pct > 0 || (used ?? 0) > 0 {
-                var text: String? = nil
-                if let used, let cap { text = "\(money(used, currency)) de \(money(cap, currency))" }
-                else if let used, used > 0 { text = money(used, currency) }
-                out.append(Limit(id: "spend", label: "Gasto", percent: pct,
-                                 resetsAt: nil, isActive: (sp["enabled"] as? Bool) ?? false,
-                                 group: "spend", detail: text))
-            }
+        let sp = util["spend"] as? [String: Any]
+        let spUsed = minor(sp?["used"] as? [String: Any])
+        let spCap = minor(sp?["limit"] as? [String: Any]) ?? minor(sp?["cap"] as? [String: Any])
+        let spPct = Int((sp?["percent"] as? Double) ?? 0)
+        let spCurrency = (sp?["used"] as? [String: Any])?["currency"] as? String
+        var spendEntry: Limit? = nil
+        if sp != nil, (spCap != nil || spPct > 0 || (spUsed ?? 0) > 0) {
+            var text: String? = nil
+            if let spUsed, let spCap { text = "\(money(spUsed, spCurrency)) de \(money(spCap, spCurrency))" }
+            else if let spUsed, spUsed > 0 { text = money(spUsed, spCurrency) }
+            spendEntry = Limit(id: "spend", label: "Gasto", percent: spPct,
+                               resetsAt: nil, isActive: (sp?["enabled"] as? Bool) ?? false,
+                               group: "spend", detail: text)
         }
 
-        if let ex = util["extra_usage"] as? [String: Any],
-           (ex["is_enabled"] as? Bool) == true {
+        var out: [Limit] = []
+        if let ex = util["extra_usage"] as? [String: Any], (ex["is_enabled"] as? Bool) == true {
+            // "decimal_places", no "exponent": mismos centavos que `spend`, otra clave.
+            let scale = pow(10, (ex["decimal_places"] as? Double) ?? 2)
             let cur = ex["currency"] as? String
-            let used = ex["used_credits"] as? Double
-            let cap = ex["monthly_limit"] as? Double
+            let used = (ex["used_credits"] as? Double).map { $0 / scale }
+            let cap = (ex["monthly_limit"] as? Double).map { $0 / scale }
             var text: String? = nil
             if let used, let cap { text = "\(money(used, cur)) de \(money(cap, cur))" }
-            out.append(Limit(id: "extra_usage",
+            let creditsEntry = Limit(id: "extra_usage",
                              label: "Créditos del mes",
                              percent: Int((ex["utilization"] as? Double) ?? 0),
                              resetsAt: nil,
                              isActive: (ex["spend_limit_reached"] as? Bool) != true,
-                             group: "monthly", detail: text))
+                             group: "monthly", detail: text)
+
+            // `spend` y los créditos suelen ser la misma bolsa vista dos veces
+            // (mismo usado, mismo tope). Mostrar las dos por separado es el
+            // "2/2%" confuso, como si fueran dos ventanas de tiempo distintas
+            // en vez de un solo número — así que si coinciden, una basta.
+            let sameBolsa = spUsed != nil && used != nil
+                && abs(spUsed! - used!) < 0.01 && abs((spCap ?? -1) - (cap ?? -2)) < 0.01
+            out.append(creditsEntry)
+            if let spendEntry, !sameBolsa { out.append(spendEntry) }
 
             // El límite mensual puede llevar sub-ventanas diaria y semanal.
             for (key, name) in [("daily", "Créditos del día"), ("weekly", "Créditos de la semana")] {
                 guard let sub = ex[key] as? [String: Any] else { continue }
-                let u = sub["used_credits"] as? Double
-                let c = sub["limit"] as? Double ?? sub["monthly_limit"] as? Double
+                let u = (sub["used_credits"] as? Double).map { $0 / scale }
+                let c = (sub["limit"] as? Double ?? sub["monthly_limit"] as? Double).map { $0 / scale }
                 var t: String? = nil
                 if let u, let c { t = "\(money(u, cur)) de \(money(c, cur))" }
                 out.append(Limit(id: "extra_\(key)", label: name,
@@ -364,6 +402,8 @@ enum LocalUsage {
                                  resetsAt: date(sub["resets_at"]), isActive: false,
                                  group: key == "daily" ? "daily" : "weekly", detail: t))
             }
+        } else if let spendEntry {
+            out.append(spendEntry)
         }
         return out
     }
@@ -699,6 +739,16 @@ final class PetStore: ObservableObject {
     }
     @Published private(set) var loginError: String?
 
+    /// Team/Enterprise no tiene ninguna fuente gratis que se refresque sola
+    /// (a diferencia de `rate_limits` en Pro/Max): esto SÍ gasta 1 request cada
+    /// vez, así que es opt-in y solo dispara cuando de verdad hace falta.
+    @Published var autoForceEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(autoForceEnabled, forKey: "autoForceEnabled")
+            scheduleAutoForce()
+        }
+    }
+
     /// Si está activo, cada tanto a Clawd le da por hacer algo.
     @Published var activitiesEnabled: Bool {
         didSet {
@@ -727,6 +777,7 @@ final class PetStore: ObservableObject {
 
     private var timer: Timer?
     private var activityTimer: Timer?
+    private var autoForceTimer: Timer?
     private var syncingLogin = false
     private var lastStamps: [Date?] = []
     private var watchers: [FileWatcher] = []
@@ -742,6 +793,11 @@ final class PetStore: ObservableObject {
         notifyEnabled = d.object(forKey: "notifyEnabled") as? Bool ?? true
         tintClawd     = d.object(forKey: "tintClawd") as? Bool ?? false
         activitiesEnabled = d.object(forKey: "activitiesEnabled") as? Bool ?? true
+        // Encendido por defecto: solo se muestra y solo dispara en planes sin
+        // "session"/"weekly_all" (Team/Enterprise), donde no hay ninguna otra
+        // fuente que se refresque sola — a diferencia de Pro/Max, que ya
+        // funciona bien gratis y nunca llega a ver este interruptor.
+        autoForceEnabled  = d.object(forKey: "autoForceEnabled") as? Bool ?? true
         // La verdad la tiene el sistema, no UserDefaults: el usuario pudo quitarlo
         // a mano desde Ajustes y hay que reflejarlo.
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -760,8 +816,23 @@ final class PetStore: ObservableObject {
             },
         ]
         scheduleTimer()
+        scheduleAutoForce()
         if CommandLine.arguments.contains(where: { $0.hasPrefix("--demo") }) { startDemo() } else { scheduleActivity() }
         reload(announce: true)
+    }
+
+    /// Pide `/usage` sola cada 5 min si el usuario activó `autoForceEnabled`, y
+    /// solo si de verdad no hay ninguna fuente gratis (Team/Enterprise): jamás
+    /// gasta cuota de un plan Pro/Max que ya se refresca solo con `rate_limits`.
+    private func scheduleAutoForce() {
+        autoForceTimer?.invalidate()
+        guard autoForceEnabled else { return }
+        autoForceTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.usage?.session == nil, self.usage?.weekly == nil else { return }
+                self.forceRefresh()
+            }
+        }
     }
 
     /// `--demo` recorre todas las actividades en bucle; `--demo=nap` fija una sola.
@@ -950,6 +1021,7 @@ struct RingKey: View {
     let pct: Int
     let label: String
     var small = false
+    var detail: String? = nil
 
     var body: some View {
         HStack(spacing: 3) {
@@ -958,6 +1030,9 @@ struct RingKey: View {
                 .frame(width: 8, height: 8)
             Text(label)
         }
+        // ponytail: tooltip nativo de macOS en vez de un segundo texto fijo —
+        // el detalle en dólares aparece al pasar el mouse, sin ocupar espacio.
+        .help(detail ?? "")
     }
 }
 
@@ -1381,6 +1456,9 @@ struct MascotView: View {
     var showRing = true
     var backdrop = false
     var tinted = false
+    /// false cuando el plan solo separa una dimensión (Team/Enterprise): un
+    /// solo anillo, del ancho del exterior, en vez de uno relleno y otro vacío.
+    var hasSecondary = true
 
     @State private var spin = 0.0
 
@@ -1398,8 +1476,12 @@ struct MascotView: View {
                     .padding(size * 0.028)
             }
             if showRing {
-                ProgressRing(pct: weekPct, lineWidth: outerWidth)
-                ProgressRing(pct: sessionPct, lineWidth: innerWidth, inset: innerInset)
+                if hasSecondary {
+                    ProgressRing(pct: weekPct, lineWidth: outerWidth)
+                    ProgressRing(pct: sessionPct, lineWidth: innerWidth, inset: innerInset)
+                } else {
+                    ProgressRing(pct: sessionPct, lineWidth: outerWidth)
+                }
             }
             if busy {
                 Circle()
@@ -1471,7 +1553,8 @@ struct PanelView: View {
                            sessionPct: store.usage?.sessionPct ?? 0,
                            busy: store.forcing,
                            activity: store.activity, night: store.isNight,
-                           size: 66, tinted: store.tintClawd)
+                           size: 66, tinted: store.tintClawd,
+                           hasSecondary: store.usage?.hasSecondary ?? true)
                     .contentShape(Circle())
                     .onTapGesture { store.poke() }
                 VStack(alignment: .leading, spacing: 3) {
@@ -1481,9 +1564,16 @@ struct PanelView: View {
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 4) {
-                        RingKey(pct: store.usage?.weekPct ?? 0, label: "semana")
-                        Text("·").foregroundStyle(.quaternary)
-                        RingKey(pct: store.usage?.sessionPct ?? 0, label: "sesión", small: true)
+                        if store.usage?.hasSecondary ?? true {
+                            RingKey(pct: store.usage?.weekPct ?? 0, label: store.usage?.weekLabel ?? "semana")
+                            Text("·").foregroundStyle(.quaternary)
+                            RingKey(pct: store.usage?.sessionPct ?? 0, label: store.usage?.sessionLabel ?? "sesión", small: true)
+                        } else {
+                            // Una sola bolsa (Team/Enterprise): una barra, no dos ventanas inventadas.
+                            // El detalle en dólares va de tooltip, no ocupa espacio fijo.
+                            RingKey(pct: store.usage?.sessionPct ?? 0, label: store.usage?.sessionLabel ?? "uso",
+                                    detail: store.usage?.sessionDetail)
+                        }
                     }
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
@@ -1595,6 +1685,14 @@ struct PanelView: View {
                 Button("Salir") { NSApplication.shared.terminate(nil) }
                     .controlSize(.small)
             }
+
+            // Solo aplica a Team/Enterprise: sin "session"/"weekly_all" no hay
+            // ninguna fuente que se refresque sola, así que el único modo de
+            // no ver un dato viejo es pedirlo de nuevo, y eso cuesta.
+            if store.usage?.session == nil, store.usage?.weekly == nil {
+                Toggle("Auto cada 5 min (gasta 1 request c/u)", isOn: $store.autoForceEnabled)
+                    .toggleStyle(.switch).controlSize(.mini).font(.system(size: 10))
+            }
         }
         .padding(15)
         .frame(width: 306)
@@ -1636,10 +1734,12 @@ struct DesktopPetView: View {
 
     private var hoverText: String {
         guard let u = store.usage else { return "Sin datos todavía" }
-        let parts = [u.session, u.weekly].compactMap { $0 }
-            .map { "\($0.label.hasPrefix("Sesión") ? "Sesión" : "Semana") \($0.percent)%" }
+        var parts = ["\(u.session != nil ? "Sesión" : u.sessionLabel) \(u.sessionPct)%"]
+        if u.hasSecondary { parts.append("\(u.weekly != nil ? "Semana" : u.weekLabel) \(u.weekPct)%") }
         let age = "\(Fmt.ago(u.fetchedAt))"
-        return parts.joined(separator: " · ") + "\n"
+        var text = parts.joined(separator: " · ")
+        if !u.hasSecondary, let detail = u.sessionDetail { text += "\n\(detail)" }
+        return text + "\n"
              + (store.dataLooksStale ? "⚠︎ dato de \(age), puede estar viejo" : age)
     }
 
@@ -1656,7 +1756,8 @@ struct DesktopPetView: View {
                        sessionPct: store.usage?.sessionPct ?? 0,
                        busy: store.forcing,
                        activity: store.activity, night: store.isNight,
-                       size: 96, backdrop: true, tinted: store.tintClawd)
+                       size: 96, backdrop: true, tinted: store.tintClawd,
+                       hasSecondary: store.usage?.hasSecondary ?? true)
                 .contentShape(Circle())
                 .onTapGesture { store.poke() }
                 .help("Clic: saludar · Clic derecho: opciones · Arrastra para mover")
@@ -1667,7 +1768,7 @@ struct DesktopPetView: View {
                     Image(systemName: "clock.badge.exclamationmark")
                         .font(.system(size: 8, weight: .bold))
                 }
-                Text("\(store.usage?.sessionPct ?? 0)/\(store.usage?.weekPct ?? 0)%")
+                Text(store.usage?.compactText ?? "0/0%")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
             }
             .foregroundStyle(.white)
@@ -1888,7 +1989,7 @@ struct ClaudePetApp: App {
             let tint = store.tintClawd ? NSColor(store.mood.color) : Clawd.brandNS
             HStack(spacing: 4) {
                 Image(nsImage: Clawd.menuBarImage(color: tint, night: store.isNight))
-                if let u = store.usage { Text("\(u.sessionPct)/\(u.weekPct)%") }
+                if let u = store.usage { Text(u.compactText) }
             }
         }
         .menuBarExtraStyle(.window)
