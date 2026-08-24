@@ -773,6 +773,18 @@ final class PetStore: ObservableObject {
     /// con Claude Code cerrado la cuota no se mueve.
     var dataLooksStale: Bool { (usage?.isStale ?? false) && claudeActive }
 
+    /// Si el plan publica `rate_limits` (Pro/Max) hay una fuente que se refresca
+    /// sola y gratis... mientras Claude Code esté abierto. Team/Enterprise no la
+    /// tiene nunca.
+    var hasFreeSource: Bool { usage?.session != nil || usage?.weekly != nil }
+
+    /// Cuándo vale la pena gastar un arranque del CLI. En Team/Enterprise, cada
+    /// vez que toque el timer: no hay otra fuente. En Pro/Max solo si el dato
+    /// local ya está viejo — con Claude Code abierto el hook lo mantiene fresco
+    /// y pedir `/usage` sería tirar 1,3 s de CPU para nada. Sin dato ninguno,
+    /// preguntar siempre vale la pena.
+    var autoForceIsDue: Bool { !hasFreeSource || (usage?.isStale ?? true) }
+
     @Published var petVisible: Bool {
         didSet {
             UserDefaults.standard.set(petVisible, forKey: "petVisible")
@@ -799,10 +811,13 @@ final class PetStore: ObservableObject {
     }
     @Published private(set) var loginError: String?
 
-    /// Team/Enterprise no tiene ninguna fuente gratis que se refresque sola
-    /// (a diferencia de `rate_limits` en Pro/Max): hay que pedir `/usage`. Es una
-    /// consulta de estado que no gasta tokens, pero aun así solo dispara cuando de
-    /// verdad hace falta, y avisa la primera vez.
+    /// Ningún plan se refresca solo con Claude Code cerrado: Team/Enterprise no
+    /// publica `rate_limits`, y el `rate_limits` de Pro/Max lo escribe el hook de
+    /// `statusLine`, que solo corre mientras haya una sesión abierta. Cerrado
+    /// Claude Code la cifra se congela y `/usage` es la única forma de traer una
+    /// fresca. Es una consulta de estado que no gasta tokens, pero aun así solo
+    /// dispara cuando de verdad hace falta (`autoForceIsDue`), y avisa la
+    /// primera vez.
     @Published var autoForceEnabled: Bool {
         didSet {
             UserDefaults.standard.set(autoForceEnabled, forKey: "autoForceEnabled")
@@ -898,15 +913,16 @@ final class PetStore: ObservableObject {
     }
 
     /// Pide `/usage` sola cada `autoForceSeconds` si el usuario lo activó, y solo
-    /// si de verdad no hay ninguna fuente gratis (Team/Enterprise): jamás gasta
-    /// cuota de un plan Pro/Max que ya se refresca solo con `rate_limits`.
+    /// cuando hace falta (`autoForceIsDue`): en Pro/Max, mientras Claude Code esté
+    /// abierto alimentando `pet-usage.json`, el timer salta sin arrancar nada.
+    /// `/usage` no gasta tokens en ningún plan.
     private func scheduleAutoForce() {
         autoForceTimer?.invalidate()
         guard autoForceEnabled else { return }
         let secs = Double(max(60, autoForceSeconds))
         autoForceTimer = Timer.scheduledTimer(withTimeInterval: secs, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.usage?.session == nil, self.usage?.weekly == nil else { return }
+                guard let self, self.autoForceIsDue else { return }
                 // La primera vez que consulta sola, avisar: aunque `/usage` sea
                 // casi gratis, es una acción automática y no debe sorprender.
                 let notifiedKey = "autoForceNotified"
@@ -914,7 +930,9 @@ final class PetStore: ObservableObject {
                     UserDefaults.standard.set(true, forKey: notifiedKey)
                     Notifier.shared.send(
                         title: "Clawd consulta tu uso solo",
-                        body: "Tu plan no publica la cuota gratis, así que Clawd la pide con «/usage» cada tanto. No gasta tokens; el intervalo y el interruptor están en el panel.")
+                        body: self.hasFreeSource
+                            ? "Tu dato local lleva rato parado (Claude Code cerrado), así que Clawd lo pide con «/usage». No gasta tokens; el interruptor está en el panel."
+                            : "Tu plan no publica la cuota gratis, así que Clawd la pide con «/usage» cada tanto. No gasta tokens; el intervalo y el interruptor están en el panel.")
                 }
                 guard !self.noAccess else { return }
                 self.forceRefresh(silent: true) { [weak self] ok in
@@ -1683,12 +1701,14 @@ struct PanelView: View {
         (60, "cada minuto"), (120, "cada 2 min"), (300, "cada 5 min"),
     ]
 
-    /// Lo que cuesta el intervalo elegido, medido en esta máquina: 1,32 s de CPU
-    /// por consulta. Se enseña al lado del selector para que la decisión no sea
-    /// a ciegas.
+    /// Lo que cuesta de verdad, medido en esta máquina: 1,32 s de CPU por
+    /// consulta. Se enseña para que la decisión no sea a ciegas. En Pro/Max el
+    /// intervalo del selector no manda: como solo dispara con el dato viejo, dos
+    /// consultas no pueden caer más juntas que `staleAfter`.
     private var autoForceCost: String {
         let secs = Double(max(60, store.autoForceSeconds))
-        return String(format: "~%.1f %% de un núcleo", 1.32 / secs * 100)
+        let real = store.hasFreeSource ? max(secs, Usage.staleAfter) : secs
+        return String(format: "~%.1f %% de un núcleo", 1.32 / real * 100)
     }
 
     var body: some View {
@@ -1835,14 +1855,22 @@ struct PanelView: View {
                     .controlSize(.small)
             }
 
-            // Solo aplica a Team/Enterprise: sin "session"/"weekly_all" no hay
-            // ninguna fuente que se refresque sola, así que el único modo de no
-            // ver un dato viejo es pedirlo de nuevo. `/usage` no gasta tokens,
-            // pero cada consulta arranca el CLI entero: de ahí el selector.
-            if store.usage?.session == nil, store.usage?.weekly == nil {
-                Toggle("Consultar /usage sola (no gasta tokens)", isOn: $store.autoForceEnabled)
-                    .toggleStyle(.switch).controlSize(.mini).font(.system(size: 10))
-                if store.autoForceEnabled {
+            // El único modo de no quedarse mirando un dato viejo es pedirlo otra
+            // vez: en Team/Enterprise porque no hay ninguna fuente que se refresque
+            // sola, y en Pro/Max porque la que hay (`rate_limits`, vía el hook) se
+            // para en seco al cerrar Claude Code. `/usage` no gasta tokens, pero
+            // cada consulta arranca el CLI entero: de ahí el interruptor.
+            Toggle("Consultar /usage sola (no gasta tokens)", isOn: $store.autoForceEnabled)
+                .toggleStyle(.switch).controlSize(.mini).font(.system(size: 10))
+            if store.autoForceEnabled {
+                if store.hasFreeSource {
+                    // Sin selector a propósito: aquí solo dispara con el dato
+                    // viejo, así que el intervalo real lo fija `staleAfter`.
+                    Text("Solo con Claude Code cerrado, cuando el dato pasa de 15 min. "
+                         + autoForceCost + ".")
+                        .font(.system(size: 9)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
                     HStack {
                         Picker("", selection: $store.autoForceSeconds) {
                             ForEach(autoForceOptions, id: \.0) { Text($0.1).tag($0.0) }

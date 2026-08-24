@@ -65,6 +65,17 @@ badge se pone gris con un ⏱ y el panel marca la antigüedad.
 > del proyecto ganan sobre `~/.claude/settings.json`, que es donde escribe el instalador,
 > y ahí el hook no llega a ejecutarse. `--dump` te lo dice desde el directorio en cuestión.
 
+## Con Claude Code cerrado
+
+El hook solo corre mientras hay una sesión abierta, así que al cerrar Claude Code la cifra
+se congela. No es un fallo —con Claude Code cerrado tu cuota tampoco se mueve—, pero la
+ventana sí avanza y el dato envejece.
+
+Por eso, pasados 15 minutos sin dato fresco, Clawd pide `/usage` él solo. **No gasta
+tokens** (ver más abajo) y no dispara mientras el hook esté alimentando el archivo: con
+Claude Code abierto, cero procesos. Sale a ~0,1 % de un núcleo. Se apaga en el panel con
+«Consultar /usage sola».
+
 ## Permisos
 
 Sin red, sin Automatización, sin Accesibilidad, sin acceso a archivos protegidos. Solo
@@ -114,10 +125,11 @@ Se miden en dinero, no en porcentaje. La app dibuja todas las dimensiones que en
 sesión no usa una suscripción de Claude.ai (API key, Bedrock, Vertex) no hay límites que
 mostrar y la app lo dice.
 
-En esos planes no hay ninguna fuente que se refresque sola, así que la app puede pedir
-`/usage` cada tanto. **No gasta tokens** — medido con `--output-format json`: `num_turns`
-0, `total_cost_usd` 0. Lo que cuesta es arrancar el CLI (~1,3 s de CPU y un pico de
-580 MB), así que el intervalo se elige en el panel y el mínimo es un minuto:
+En esos planes no hay ninguna fuente que se refresque sola —ni siquiera con Claude Code
+abierto, porque no publican `rate_limits`—, así que `/usage` no es el plan B sino el único.
+**No gasta tokens**, medido con `--output-format json`: `num_turns` 0, `total_cost_usd` 0.
+Lo que cuesta es arrancar el CLI (~1,3 s de CPU y un pico de 580 MB), así que aquí sí se
+elige el intervalo en el panel, con un mínimo de un minuto:
 
 | Intervalo | Coste |
 |---|---|
@@ -125,7 +137,8 @@ En esos planes no hay ninguna fuente que se refresque sola, así que la app pued
 | cada 2 min | ~1,1 % |
 | cada 5 min (por defecto) | ~0,4 % |
 
-Solo aparece en los planes que lo necesitan, y se puede apagar.
+En Pro/Max el selector no aparece: allí solo dispara con el dato viejo, así que el
+intervalo lo fija ese umbral de 15 minutos. Se puede apagar en los dos casos.
 
 Para probar con datos de otro plan sin tocar los tuyos:
 
