@@ -25,37 +25,19 @@ A mano:
 open ClaudePet.app  # arranca
 ```
 
-También hay un ejecutable ya empaquetado en [`dist/ClaudePet-1.0.zip`](dist/) —
-descomprimir y `bash install.sh`. Va firmado *ad-hoc*, sin cuenta de desarrollador de
-Apple, así que el instalador tiene que retirarle la cuarentena: si prefieres no confiar
-en un binario que no puedes verificar, compílalo tú con `./build.sh` — el resultado es
-el mismo y no pasa por Gatekeeper.
+No hay binarios precompilados en el repo: `./build.sh` compila en tu máquina en segundos
+y evita Gatekeeper por completo.
 
 ### Ubuntu
 
 ```bash
-sudo apt install ./dist/claudepet_1.3_all.deb
-claudepet &
+./install-linux.sh
 ```
 
+Genera el `.deb` desde el fuente, lo instala con `apt` e instala el hook de `statusLine`.
 Versión en Python con applet de bandeja: ver [`linux/README.md`](linux/README.md). La app
 de macOS no se puede portar (SwiftUI, AppKit y compañía son exclusivos de Darwin).
 Las versiones de macOS y Linux avanzan por separado.
-
-### Verificar los binarios de `dist/`
-
-```
-82f3cb65383156fda1f416cbb442aabd44aed85eac028f8a7ba0988e38a8024f  ClaudePet-1.0.zip
-fadc7273f6d406b93b992b5beb2dd8153e0025eeccf8b26730ef8592a70c711a  claudepet_1.3_all.deb
-```
-
-```bash
-shasum -a 256 dist/*        # macOS
-sha256sum dist/*            # Linux
-```
-
-Se regeneran con `./package.sh` y `python3 linux/build-deb.py`; el hash cambia con cada
-compilación, así que si no coincide, compila desde el fuente en vez de fiarte.
 
 ## El hook de `statusLine` (recomendado)
 
