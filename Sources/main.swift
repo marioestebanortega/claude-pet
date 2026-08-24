@@ -880,10 +880,11 @@ final class PetStore: ObservableObject {
         notifyEnabled = d.object(forKey: "notifyEnabled") as? Bool ?? true
         tintClawd     = d.object(forKey: "tintClawd") as? Bool ?? false
         activitiesEnabled = d.object(forKey: "activitiesEnabled") as? Bool ?? true
-        // Encendido por defecto: solo se muestra y solo dispara en planes sin
-        // "session"/"weekly_all" (Team/Enterprise), donde no hay ninguna otra
-        // fuente que se refresque sola — a diferencia de Pro/Max, que ya
-        // funciona bien gratis y nunca llega a ver este interruptor.
+        // Encendido por defecto en todos los planes: sin esto, quien cierre
+        // Claude Code se queda mirando una cifra congelada y el interruptor no
+        // lo encuentra nadie. Lo que evita la sorpresa es el aviso de la primera
+        // vez, no venir apagado. Cuánto cuesta de verdad: `autoForceIsDue` no
+        // deja que dispare mientras el hook mantenga el dato fresco.
         autoForceEnabled  = d.object(forKey: "autoForceEnabled") as? Bool ?? true
         autoForceSeconds  = d.object(forKey: "autoForceSeconds") as? Int ?? 300
         // La verdad la tiene el sistema, no UserDefaults: el usuario pudo quitarlo
