@@ -994,7 +994,7 @@ final class PetStore: ObservableObject {
     }
 
     /// Lectura local: instantánea y sin costo.
-    func reload(announce: Bool = false, force: Bool = false) {
+    func reload(announce: Bool = false, force: Bool = false, silent: Bool = false) {
         tick = Date()
         claudeActive = LocalUsage.claudeCodeActive()
 
@@ -1013,7 +1013,7 @@ final class PetStore: ObservableObject {
         usage = fresh
         lastWorst = fresh.worst
 
-        if announce || (changed && fresh.worst != previousWorst) {
+        if !silent && (announce || (changed && fresh.worst != previousWorst)) {
             say(mood.phrase(seed: fresh.worst &+ Int(fresh.fetchedAt.timeIntervalSince1970) / 97))
             maybeNotify(new: fresh)
         }
@@ -1029,7 +1029,7 @@ final class PetStore: ObservableObject {
             await MainActor.run {
                 self.forcing = false
                 if let err { self.errorMsg = err }
-                self.reload(announce: !silent)
+                self.reload(announce: !silent, silent: silent)
             }
         }
     }
