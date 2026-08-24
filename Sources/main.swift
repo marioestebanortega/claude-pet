@@ -762,6 +762,7 @@ final class PetStore: ObservableObject {
     @Published private(set) var forcing = false
     @Published private(set) var errorMsg: String?
     @Published private(set) var noAccess = false
+    @Published var demoOld = false
     private var autoForceFailures = 0
     @Published private(set) var bubble: String?
     @Published private(set) var tick = Date()   // para refrescar los "hace X min"
@@ -890,6 +891,7 @@ final class PetStore: ObservableObject {
         scheduleTimer()
         scheduleAutoForce()
         if CommandLine.arguments.contains("--demo=sick") { noAccess = true; scheduleActivity() }
+        else if CommandLine.arguments.contains("--demo=old") { demoOld = true; scheduleActivity() }
         else if CommandLine.arguments.contains(where: { $0.hasPrefix("--demo") }) { startDemo() }
         else { scheduleActivity() }
         reload(announce: true)
@@ -1258,6 +1260,12 @@ enum Clawd {
     static let thermCol    = Color(red: 0xED/255, green: 0x4C/255, blue: 0x4C/255)
     static let sickColor   = Color(red: 0x68/255, green: 0xC2/255, blue: 0x7A/255)
 
+    static let cane      = [".#", ".#", ".#", ".#", "##"]
+    static let caneCol   = Color(red: 0xC8/255, green: 0xA8/255, blue: 0x78/255)
+    static let oldColor  = Color(red: 0xA0/255, green: 0x98/255, blue: 0x90/255)
+    static let beard     = ["#####", "#####", "#####"]
+    static let beardCol  = Color.white
+
     /// Rejilla del cuerpo con ojos, boca y patas según el estado.
     static func bodyGrid(eyes: Eyes, mouth: Int, legLift: Int) -> [[Bool]] {
         var g = body.map { $0.map { $0 == "#" } }
@@ -1352,6 +1360,7 @@ struct ClawdView: View {
     var clawdWidth: CGFloat = 44
     var tinted = false
     var sick = false
+    var old  = false
 
     // Lienzo: deja sitio arriba para el gorrito y a la derecha para los accesorios.
     private static let canvasCols = 15, canvasRows = 12
@@ -1382,7 +1391,7 @@ struct ClawdView: View {
     private let blinkTimer = Timer.publish(every: 3.4, on: .main, in: .common).autoconnect()
 
     private var cell: CGFloat { clawdWidth / CGFloat(Clawd.cols) }
-    private var skin: Color { sick ? Clawd.sickColor : tinted ? mood.color : Clawd.brand }
+    private var skin: Color { sick ? Clawd.sickColor : old ? Clawd.oldColor : tinted ? mood.color : Clawd.brand }
 
     // ── Estado de la cara y el cuerpo según la actividad ──────
     private var sipping: Bool { beat % 9 >= 6 }
@@ -1401,7 +1410,7 @@ struct ClawdView: View {
     }
 
     private var mouth: Int {
-        if sick { return 5 }
+        if sick || old { return 5 }
         switch activity {
         case .yawn:    return 3
         case .smile:   return 4      // sonrisa curva
@@ -1513,6 +1522,10 @@ struct ClawdView: View {
                            shift: CGSize(width: t * 0.7, height: -t * 1.8)),
             ]
         default:
+            if old {
+                return [PixelLayer(rows: Clawd.cane, color: Clawd.caneCol,
+                                   dx: Self.propDX, dy: Self.clawdDY + 3)]
+            }
             return []
         }
     }
@@ -1581,6 +1594,7 @@ struct MascotView: View {
     var backdrop = false
     var tinted = false
     var sick = false
+    var old  = false
     /// false cuando el plan solo separa una dimensión (Team/Enterprise): un
     /// solo anillo, del ancho del exterior, en vez de uno relleno y otro vacío.
     var hasSecondary = true
@@ -1617,7 +1631,7 @@ struct MascotView: View {
             }
             // Clawd tiene que caber DENTRO del anillo interior, de ahí el 0.48.
             ClawdView(mood: mood, activity: activity, night: night,
-                      clawdWidth: size * 0.48, tinted: tinted, sick: sick)
+                      clawdWidth: size * 0.48, tinted: tinted, sick: sick, old: old)
         }
         .frame(width: size, height: size)
         .onAppear {
@@ -1695,6 +1709,7 @@ struct PanelView: View {
                            activity: store.activity, night: store.isNight,
                            size: 66, tinted: store.tintClawd,
                            sick: store.noAccess,
+                           old: store.dataLooksStale || store.demoOld,
                            hasSecondary: store.usage?.hasSecondary ?? true)
                     .contentShape(Circle())
                     .onTapGesture { store.poke() }
@@ -1909,6 +1924,7 @@ struct DesktopPetView: View {
                        activity: store.activity, night: store.isNight,
                        size: 96, backdrop: true, tinted: store.tintClawd,
                        sick: store.noAccess,
+                       old: store.dataLooksStale || store.demoOld,
                        hasSecondary: store.usage?.hasSecondary ?? true)
                 .contentShape(Circle())
                 .onTapGesture { store.poke() }
