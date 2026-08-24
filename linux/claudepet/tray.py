@@ -93,7 +93,8 @@ class Tray:
 
         # "Forzar": pregunta al servidor con `claude -p "/usage"`, que reescribe el
         # caché con cifras frescas. Útil en Team/Enterprise, donde ~/.claude.json
-        # se refresca poco. `/usage` es una consulta de estado: coste ~nulo.
+        # se refresca poco. `/usage` no gasta tokens: el CLI lo resuelve sin
+        # un turno del modelo (medido: num_turns 0, total_cost_usd 0).
         self._force_item = Gtk.MenuItem(label="Forzar (/usage)")
         self._force_item.connect("activate", lambda *_: self.hub.force_usage(self._on_force_state))
         self.menu.append(self._force_item)

@@ -542,7 +542,7 @@ enum LocalUsage {
 }
 
 // ─────────────────────────────────────────────────────────────
-// MARK: - Refresco manual vía CLI (`/usage`, coste casi nulo)
+// MARK: - Refresco manual vía CLI (`/usage`, 0 tokens)
 // ─────────────────────────────────────────────────────────────
 
 enum ClaudeRunner {
@@ -798,11 +798,22 @@ final class PetStore: ObservableObject {
 
     /// Team/Enterprise no tiene ninguna fuente gratis que se refresque sola
     /// (a diferencia de `rate_limits` en Pro/Max): hay que pedir `/usage`. Es una
-    /// consulta de estado (coste casi nulo), pero aun así solo dispara cuando de
+    /// consulta de estado que no gasta tokens, pero aun así solo dispara cuando de
     /// verdad hace falta, y avisa la primera vez.
     @Published var autoForceEnabled: Bool {
         didSet {
             UserDefaults.standard.set(autoForceEnabled, forKey: "autoForceEnabled")
+            scheduleAutoForce()
+        }
+    }
+
+    /// Cada cuántos segundos se pide `/usage` sola. `/usage` no gasta tokens
+    /// (medido: `num_turns` 0, `total_cost_usd` 0), pero cada consulta arranca
+    /// el CLI entero: ~1,3 s de CPU y un pico de 580 MB. Por eso es un ajuste y
+    /// no una constante, y por eso el mínimo es un minuto y no treinta segundos.
+    @Published var autoForceSeconds: Int {
+        didSet {
+            UserDefaults.standard.set(autoForceSeconds, forKey: "autoForceSeconds")
             scheduleAutoForce()
         }
     }
@@ -856,6 +867,7 @@ final class PetStore: ObservableObject {
         // fuente que se refresque sola — a diferencia de Pro/Max, que ya
         // funciona bien gratis y nunca llega a ver este interruptor.
         autoForceEnabled  = d.object(forKey: "autoForceEnabled") as? Bool ?? true
+        autoForceSeconds  = d.object(forKey: "autoForceSeconds") as? Int ?? 300
         // La verdad la tiene el sistema, no UserDefaults: el usuario pudo quitarlo
         // a mano desde Ajustes y hay que reflejarlo.
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -879,13 +891,14 @@ final class PetStore: ObservableObject {
         reload(announce: true)
     }
 
-    /// Pide `/usage` sola cada 5 min si el usuario activó `autoForceEnabled`, y
-    /// solo si de verdad no hay ninguna fuente gratis (Team/Enterprise): jamás
-    /// gasta cuota de un plan Pro/Max que ya se refresca solo con `rate_limits`.
+    /// Pide `/usage` sola cada `autoForceSeconds` si el usuario lo activó, y solo
+    /// si de verdad no hay ninguna fuente gratis (Team/Enterprise): jamás gasta
+    /// cuota de un plan Pro/Max que ya se refresca solo con `rate_limits`.
     private func scheduleAutoForce() {
         autoForceTimer?.invalidate()
         guard autoForceEnabled else { return }
-        autoForceTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+        let secs = Double(max(60, autoForceSeconds))
+        autoForceTimer = Timer.scheduledTimer(withTimeInterval: secs, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.usage?.session == nil, self.usage?.weekly == nil else { return }
                 // La primera vez que consulta sola, avisar: aunque `/usage` sea
@@ -895,7 +908,7 @@ final class PetStore: ObservableObject {
                     UserDefaults.standard.set(true, forKey: notifiedKey)
                     Notifier.shared.send(
                         title: "Clawd consulta tu uso solo",
-                        body: "Tu plan no publica la cuota gratis, así que Clawd la pide con «/usage» cada 5 min. Es una consulta de estado (coste casi nulo); puedes apagarlo en el panel.")
+                        body: "Tu plan no publica la cuota gratis, así que Clawd la pide con «/usage» cada tanto. No gasta tokens; el intervalo y el interruptor están en el panel.")
                 }
                 self.forceRefresh()
             }
@@ -1623,6 +1636,21 @@ struct PanelView: View {
         (60, "cada minuto"), (300, "cada 5 min"),
     ]
 
+    /// El mínimo es un minuto a propósito: cada consulta arranca el CLI de
+    /// Claude Code, que cuesta ~1,3 s de CPU y un pico de 580 MB de RAM. A 30 s
+    /// eso serían dos picos por minuto para un dato que casi no se mueve.
+    private let autoForceOptions: [(Int, String)] = [
+        (60, "cada minuto"), (120, "cada 2 min"), (300, "cada 5 min"),
+    ]
+
+    /// Lo que cuesta el intervalo elegido, medido en esta máquina: 1,32 s de CPU
+    /// por consulta. Se enseña al lado del selector para que la decisión no sea
+    /// a ciegas.
+    private var autoForceCost: String {
+        let secs = Double(max(60, store.autoForceSeconds))
+        return String(format: "~%.1f %% de un núcleo", 1.32 / secs * 100)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
 
@@ -1757,7 +1785,7 @@ struct PanelView: View {
                           systemImage: "antenna.radiowaves.left.and.right")
                 }
                 .disabled(store.forcing).controlSize(.small)
-                .help("Ejecuta `claude -p \"/usage\"` para traer cifras frescas del servidor. `/usage` es una consulta de estado, no un turno del modelo: su coste de cuota es casi nulo.")
+                .help("Ejecuta `claude -p \"/usage\"` para traer cifras frescas del servidor. No gasta tokens: el CLI lo resuelve sin un turno del modelo (medido con --output-format json: num_turns 0, total_cost_usd 0).")
 
                 Spacer()
 
@@ -1767,11 +1795,20 @@ struct PanelView: View {
 
             // Solo aplica a Team/Enterprise: sin "session"/"weekly_all" no hay
             // ninguna fuente que se refresque sola, así que el único modo de no
-            // ver un dato viejo es pedirlo de nuevo. `/usage` es una consulta de
-            // estado, así que el coste de hacerlo cada 5 min es casi nulo.
+            // ver un dato viejo es pedirlo de nuevo. `/usage` no gasta tokens,
+            // pero cada consulta arranca el CLI entero: de ahí el selector.
             if store.usage?.session == nil, store.usage?.weekly == nil {
-                Toggle("Auto cada 5 min (consulta /usage, coste casi nulo)", isOn: $store.autoForceEnabled)
+                Toggle("Consultar /usage sola (no gasta tokens)", isOn: $store.autoForceEnabled)
                     .toggleStyle(.switch).controlSize(.mini).font(.system(size: 10))
+                if store.autoForceEnabled {
+                    HStack {
+                        Picker("", selection: $store.autoForceSeconds) {
+                            ForEach(autoForceOptions, id: \.0) { Text($0.1).tag($0.0) }
+                        }
+                        .labelsHidden().controlSize(.small)
+                        Text(autoForceCost).font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .padding(15)

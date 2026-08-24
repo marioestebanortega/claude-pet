@@ -45,8 +45,8 @@ Las versiones de macOS y Linux avanzan por separado.
 ### Verificar los binarios de `dist/`
 
 ```
-7f7972f7c53ac8a0e2fe7007e88147cbc6685dbf80d5da724fd1c0b0a82f2c14  ClaudePet-1.0.zip
-8e5c5a4d7f81f2f97425ccbbd8d92b443e45edc98398d2e869fad16d7e8c3622  claudepet_1.2_all.deb
+82f3cb65383156fda1f416cbb442aabd44aed85eac028f8a7ba0988e38a8024f  ClaudePet-1.0.zip
+f0a2652a67ff1e230ce5473371b77d6ed82c063367308723c16fb0fb9b8a239e  claudepet_1.2_all.deb
 ```
 
 ```bash
@@ -129,6 +129,19 @@ Se miden en dinero, no en porcentaje. La app dibuja todas las dimensiones que en
 (gasto, créditos, ventanas del plan) y calcula el humor sobre la peor de todas. Si la
 sesión no usa una suscripción de Claude.ai (API key, Bedrock, Vertex) no hay límites que
 mostrar y la app lo dice.
+
+En esos planes no hay ninguna fuente que se refresque sola, así que la app puede pedir
+`/usage` cada tanto. **No gasta tokens** — medido con `--output-format json`: `num_turns`
+0, `total_cost_usd` 0. Lo que cuesta es arrancar el CLI (~1,3 s de CPU y un pico de
+580 MB), así que el intervalo se elige en el panel y el mínimo es un minuto:
+
+| Intervalo | Coste |
+|---|---|
+| cada minuto | ~2,2 % de un núcleo |
+| cada 2 min | ~1,1 % |
+| cada 5 min (por defecto) | ~0,4 % |
+
+Solo aparece en los planes que lo necesitan, y se puede apagar.
 
 Para probar con datos de otro plan sin tocar los tuyos:
 

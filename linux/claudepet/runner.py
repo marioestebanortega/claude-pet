@@ -3,9 +3,10 @@
 lo que reescribe el caché local (~/.claude.json) con cifras frescas. Es el
 equivalente del botón "Forzar" de la app de macOS.
 
-Pese al nombre, `/usage` es una consulta de estado, no un turno del modelo: hace
-cálculo local + un lookup, así que su coste en cuota es prácticamente nulo. Aun
-así solo se lanza cuando el usuario lo pide a mano.
+Pese al nombre, `/usage` no gasta tokens: el CLI lo resuelve sin un turno del
+modelo (medido con `--output-format json`: `num_turns` 0, `total_cost_usd` 0).
+Lo que sí cuesta es arrancar el CLI —~1,3 s de CPU y un pico de 580 MB—, así que
+solo se lanza cuando el usuario lo pide a mano.
 
 Sin dependencias de GTK a propósito (como `usage.py`): así se puede probar suelto.
 """
