@@ -71,14 +71,29 @@ def save(rl):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return None                   # otra sesión está escribiendo
+        old = {}
         try:
             with open(OUT) as f:
-                rl = merge(rl, (json.load(f) or {}).get("rate_limits"))
+                old = json.load(f) or {}
         except Exception:
             pass                          # no hay archivo aún, o está a medio escribir
+        prev = old.get("rate_limits")
+        rl = merge(rl, prev)
+
+        now = int(time.time() * 1000)
+        # `written_at_ms` dice cuándo pasamos por aquí: se sella cada vez, cada
+        # ~10 s, y por eso sirve para saber si hay una sesión viva. Lo que NO
+        # dice es si las cifras son recientes: Claude Code las refresca a saltos,
+        # así que el archivo puede llevar media hora "fresco" con un porcentaje
+        # de hace diez minutos. `changed_at_ms` es esa segunda señal: solo avanza
+        # cuando los números se mueven de verdad.
+        changed = now if rl != prev else old.get("changed_at_ms")
+        if not isinstance(changed, (int, float)):
+            changed = now                 # primera pasada, o archivo de una versión vieja
         tmp = f"{OUT}.{os.getpid()}.tmp"
         with open(tmp, "w") as f:
-            json.dump({"rate_limits": rl, "written_at_ms": int(time.time() * 1000)}, f)
+            json.dump({"rate_limits": rl, "written_at_ms": now,
+                       "changed_at_ms": int(changed)}, f)
         os.replace(tmp, OUT)              # escritura atómica
         return rl
     except Exception:

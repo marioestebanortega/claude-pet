@@ -467,6 +467,24 @@ enum LocalUsage {
         }
     }
 
+    /// Cuándo se movieron por última vez los porcentajes del hook.
+    ///
+    /// No es lo mismo que `written_at_ms`: el hook reescribe el archivo cada
+    /// ~10 s con marca nueva aunque las cifras no hayan cambiado, porque Claude
+    /// Code las refresca a saltos. Por eso `fetchedAt` nunca envejece mientras
+    /// haya una sesión viva, y sin esta segunda señal la app no puede distinguir
+    /// "recién escrito" de "recién actualizado".
+    ///
+    /// Devuelve nil si el hook es de una versión anterior a `changed_at_ms`: ahí
+    /// no se sabe, y no saber no debe disparar nada.
+    static func statusLineChangedAt() -> Date? {
+        guard let data = try? Data(contentsOf: statusLineJSON),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ms = root["changed_at_ms"] as? Double
+        else { return nil }
+        return Date(timeIntervalSince1970: ms / 1000)
+    }
+
     /// ¿Claude Code está corriendo ahora?
     ///
     /// Se deduce del mtime de los dos archivos: Claude Code reescribe
@@ -764,6 +782,7 @@ final class PetStore: ObservableObject {
     @Published private(set) var noAccess = false
     @Published var demoOld = false
     private var autoForceFailures = 0
+    private var lastAutoForce: Date?
     @Published private(set) var bubble: String?
     @Published private(set) var tick = Date()   // para refrescar los "hace X min"
     @Published private(set) var activity: Activity = .idle
@@ -783,7 +802,29 @@ final class PetStore: ObservableObject {
     /// local ya está viejo — con Claude Code abierto el hook lo mantiene fresco
     /// y pedir `/usage` sería tirar 1,3 s de CPU para nada. Sin dato ninguno,
     /// preguntar siempre vale la pena.
-    var autoForceIsDue: Bool { !hasFreeSource || (usage?.isStale ?? true) }
+    /// Las cifras llevan clavadas más de lo que dura una ventana de frescura,
+    /// aunque el archivo se siga reescribiendo. Puede ser que Claude Code no las
+    /// haya refrescado... o que simplemente no estés consumiendo nada. Desde el
+    /// archivo no se distingue, y por eso esto solo sirve para ir a preguntar con
+    /// `/usage` —que es barato y resuelve la duda— y nunca para pintar el dato
+    /// como viejo, que daría un falso positivo cada vez que te levantas a comer.
+    var figuresLookFrozen: Bool {
+        guard let changed = LocalUsage.statusLineChangedAt() else { return false }
+        return Date().timeIntervalSince(changed) > Usage.staleAfter
+    }
+
+    var autoForceIsDue: Bool {
+        // Team/Enterprise: no hay ninguna otra fuente, dispara cuando toque.
+        if !hasFreeSource { return true }
+        // En Pro/Max, como mucho una consulta por ventana. Sin este tope,
+        // `figuresLookFrozen` se realimentaría: `/usage` reescribe
+        // `~/.claude.json`, no `pet-usage.json`, así que `changed_at_ms` no se
+        // mueve y la condición seguiría siendo cierta en el siguiente tic.
+        if let last = lastAutoForce, Date().timeIntervalSince(last) < Usage.staleAfter {
+            return false
+        }
+        return (usage?.isStale ?? true) || figuresLookFrozen
+    }
 
     @Published var petVisible: Bool {
         didSet {
@@ -936,6 +977,7 @@ final class PetStore: ObservableObject {
                             : "Tu plan no publica la cuota gratis, así que Clawd la pide con «/usage» cada tanto. No gasta tokens; el intervalo y el interruptor están en el panel.")
                 }
                 guard !self.noAccess else { return }
+                self.lastAutoForce = Date()
                 self.forceRefresh(silent: true) { [weak self] ok in
                     guard let self else { return }
                     if ok {
