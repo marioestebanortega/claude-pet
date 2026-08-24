@@ -3,6 +3,8 @@
 **Clawd**, la mascota de Claude Code, vigilando tu consumo de cuota desde la barra de
 menús y como bicho flotante en el escritorio. Cambia de cara según cuánto llevas gastado.
 
+![Claude Pet en acción](usopet.png)
+
 **No consume tu cuota**: lee los datos de archivos locales que Claude Code ya escribe en
 tu máquina (`~/.claude.json` y `~/.claude/pet-usage.json`). Sin red.
 
