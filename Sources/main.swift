@@ -761,6 +761,8 @@ final class PetStore: ObservableObject {
     @Published private(set) var usage: Usage?
     @Published private(set) var forcing = false
     @Published private(set) var errorMsg: String?
+    @Published private(set) var noAccess = false
+    private var autoForceFailures = 0
     @Published private(set) var bubble: String?
     @Published private(set) var tick = Date()   // para refrescar los "hace X min"
     @Published private(set) var activity: Activity = .idle
@@ -854,7 +856,7 @@ final class PetStore: ObservableObject {
     private var lastNotifiedStep = -1
     private var lastWorst = -1
 
-    var mood: Mood { usage == nil ? .broken : Mood.from(usage!.worst) }
+    var mood: Mood { noAccess || usage == nil ? .broken : Mood.from(usage!.worst) }
 
     private init() {
         let d = UserDefaults.standard
@@ -887,7 +889,9 @@ final class PetStore: ObservableObject {
         ]
         scheduleTimer()
         scheduleAutoForce()
-        if CommandLine.arguments.contains(where: { $0.hasPrefix("--demo") }) { startDemo() } else { scheduleActivity() }
+        if CommandLine.arguments.contains("--demo=sick") { noAccess = true; scheduleActivity() }
+        else if CommandLine.arguments.contains(where: { $0.hasPrefix("--demo") }) { startDemo() }
+        else { scheduleActivity() }
         reload(announce: true)
     }
 
@@ -910,7 +914,23 @@ final class PetStore: ObservableObject {
                         title: "Clawd consulta tu uso solo",
                         body: "Tu plan no publica la cuota gratis, así que Clawd la pide con «/usage» cada tanto. No gasta tokens; el intervalo y el interruptor están en el panel.")
                 }
-                self.forceRefresh(silent: true)
+                guard !self.noAccess else { return }
+                self.forceRefresh(silent: true) { [weak self] ok in
+                    guard let self else { return }
+                    if ok {
+                        self.autoForceFailures = 0
+                    } else {
+                        self.autoForceFailures += 1
+                        if self.autoForceFailures >= 3 {
+                            self.noAccess = true
+                            self.autoForceFailures = 0
+                            self.say("Claude no responde 🤒  reintentaré en 5 min", seconds: 30)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in
+                                self?.noAccess = false
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1020,8 +1040,8 @@ final class PetStore: ObservableObject {
     }
 
     /// Único camino que habla con el servidor (`/usage`), y solo si se pide.
-    func forceRefresh(silent: Bool = false) {
-        guard !forcing else { return }
+    func forceRefresh(silent: Bool = false, onComplete: ((Bool) -> Void)? = nil) {
+        guard !forcing else { onComplete?(false); return }
         forcing = true
         if !silent { say("Preguntándole al servidor… 📡") }
         Task.detached(priority: .utility) {
@@ -1030,6 +1050,7 @@ final class PetStore: ObservableObject {
                 self.forcing = false
                 if let err { self.errorMsg = err }
                 self.reload(announce: !silent, silent: silent)
+                onComplete?(err == nil)
             }
         }
     }
@@ -1233,6 +1254,10 @@ enum Clawd {
     static let stemCol    = Color(red: 0x6B/255, green: 0x44/255, blue: 0x23/255)
     static let zedCol     = Color(red: 0xC3/255, green: 0xCD/255, blue: 0xDB/255)
 
+    static let thermometer = [".#", ".#", ".#", "##", "##"]
+    static let thermCol    = Color(red: 0xED/255, green: 0x4C/255, blue: 0x4C/255)
+    static let sickColor   = Color(red: 0x68/255, green: 0xC2/255, blue: 0x7A/255)
+
     /// Rejilla del cuerpo con ojos, boca y patas según el estado.
     static func bodyGrid(eyes: Eyes, mouth: Int, legLift: Int) -> [[Bool]] {
         var g = body.map { $0.map { $0 == "#" } }
@@ -1257,6 +1282,10 @@ enum Clawd {
             // Sonrisa ∪ : las puntas suben, el centro baja.
             g[4][3] = false; g[4][7] = false
             for c in 4...6 { g[5][c] = false }
+        case 5:
+            // Mueca triste ∩ : las puntas bajan, el centro sube.
+            g[5][3] = false; g[5][7] = false
+            for c in 4...6 { g[4][c] = false }
         default: break
         }
 
@@ -1322,6 +1351,7 @@ struct ClawdView: View {
     let night: Bool
     var clawdWidth: CGFloat = 44
     var tinted = false
+    var sick = false
 
     // Lienzo: deja sitio arriba para el gorrito y a la derecha para los accesorios.
     private static let canvasCols = 15, canvasRows = 12
@@ -1352,13 +1382,14 @@ struct ClawdView: View {
     private let blinkTimer = Timer.publish(every: 3.4, on: .main, in: .common).autoconnect()
 
     private var cell: CGFloat { clawdWidth / CGFloat(Clawd.cols) }
-    private var skin: Color { tinted ? mood.color : Clawd.brand }
+    private var skin: Color { sick ? Clawd.sickColor : tinted ? mood.color : Clawd.brand }
 
     // ── Estado de la cara y el cuerpo según la actividad ──────
     private var sipping: Bool { beat % 9 >= 6 }
     private var biting: Bool { beat % 8 >= 6 }
 
     private var eyes: Clawd.Eyes {
+        if sick { return .open }
         if blinking { return .closed }
         switch activity {
         case .nap, .yawn:   return .closed
@@ -1370,6 +1401,7 @@ struct ClawdView: View {
     }
 
     private var mouth: Int {
+        if sick { return 5 }
         switch activity {
         case .yawn:    return 3
         case .smile:   return 4      // sonrisa curva
@@ -1548,6 +1580,7 @@ struct MascotView: View {
     var showRing = true
     var backdrop = false
     var tinted = false
+    var sick = false
     /// false cuando el plan solo separa una dimensión (Team/Enterprise): un
     /// solo anillo, del ancho del exterior, en vez de uno relleno y otro vacío.
     var hasSecondary = true
@@ -1584,7 +1617,7 @@ struct MascotView: View {
             }
             // Clawd tiene que caber DENTRO del anillo interior, de ahí el 0.48.
             ClawdView(mood: mood, activity: activity, night: night,
-                      clawdWidth: size * 0.48, tinted: tinted)
+                      clawdWidth: size * 0.48, tinted: tinted, sick: sick)
         }
         .frame(width: size, height: size)
         .onAppear {
@@ -1661,6 +1694,7 @@ struct PanelView: View {
                            busy: store.forcing,
                            activity: store.activity, night: store.isNight,
                            size: 66, tinted: store.tintClawd,
+                           sick: store.noAccess,
                            hasSecondary: store.usage?.hasSecondary ?? true)
                     .contentShape(Circle())
                     .onTapGesture { store.poke() }
@@ -1874,6 +1908,7 @@ struct DesktopPetView: View {
                        busy: store.forcing,
                        activity: store.activity, night: store.isNight,
                        size: 96, backdrop: true, tinted: store.tintClawd,
+                       sick: store.noAccess,
                        hasSecondary: store.usage?.hasSecondary ?? true)
                 .contentShape(Circle())
                 .onTapGesture { store.poke() }
