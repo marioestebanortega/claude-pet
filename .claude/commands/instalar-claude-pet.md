@@ -46,6 +46,18 @@ la práctica hace falta. Comprueba e instala:
      - Linux (por `.deb`): `claudepet --install-statusline`
      - Linux (desde fuente): `cd linux && python3 -m claudepet --install-statusline`
 
+2. **Comprueba también las settings del proyecto**, que son las que mandan: lee
+   `.claude/settings.local.json` y `.claude/settings.json` del directorio actual (en
+   ese orden; gana la primera que traiga un `statusLine`). Los instaladores solo
+   escriben en `~/.claude/settings.json`, así que un `statusLine` de proyecto —
+   propio o venido en el repo del equipo — **deja el hook sin ejecutarse aquí aunque
+   la instalación haya ido bien**, y la mascota se queda en `0/0 %` sin que nada lo
+   explique.
+   - Si el que gana es el nuestro → todo en orden.
+   - Si es ajeno → **dilo antes de dar la instalación por buena**: en este proyecto
+     el hook no correrá. Las salidas son quitarlo de las settings del proyecto, o
+     hacer que ese comando llame también a `~/.claude/statusline-pet.py`.
+
 ## 3. Recordar reiniciar Claude Code
 El `statusLine` se carga **al arrancar** Claude Code. Dile claramente al usuario que
 **reinicie Claude Code** para que el hook empiece a escribir los datos; hasta

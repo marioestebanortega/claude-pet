@@ -45,8 +45,8 @@ Las versiones de macOS y Linux avanzan por separado.
 ### Verificar los binarios de `dist/`
 
 ```
-71125067484c2063735e884411cdb22dad25bca56feb2f0684611fedfd055776  ClaudePet-1.0.zip
-eba92a796ecf11b9f7cbce05cdba6f0e5347355ba6fd3a7498b4ec85543d1b36  claudepet_1.2_all.deb
+7f7972f7c53ac8a0e2fe7007e88147cbc6685dbf80d5da724fd1c0b0a82f2c14  ClaudePet-1.0.zip
+8e5c5a4d7f81f2f97425ccbbd8d92b443e45edc98398d2e869fad16d7e8c3622  claudepet_1.2_all.deb
 ```
 
 ```bash
@@ -75,6 +75,11 @@ entonces no se escribe `pet-usage.json` y seguirás viendo `0/0 %`.
 
 Si pasan 15 minutos sin datos frescos (y Claude Code está corriendo), la app lo avisa: el
 badge se pone gris con un ⏱ y el panel marca la antigüedad.
+
+> **Si sigues en `0/0 %` con el hook instalado**, mira si ese proyecto tiene su propio
+> `statusLine` en `.claude/settings.json` o `.claude/settings.local.json`: las settings
+> del proyecto ganan sobre `~/.claude/settings.json`, que es donde escribe el instalador,
+> y ahí el hook no llega a ejecutarse. `--dump` te lo dice desde el directorio en cuestión.
 
 ## Permisos
 

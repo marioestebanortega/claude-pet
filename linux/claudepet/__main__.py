@@ -10,10 +10,44 @@ from __future__ import annotations
 import sys
 
 
+def _statusline_override() -> tuple[str, str] | None:
+    """El `statusLine` que manda no es siempre el del usuario: las settings del
+    proyecto (`.claude/settings.json`, y la `.local` por encima) ganan sobre
+    `~/.claude/settings.json`, que es donde escribe `--install-statusline`. Si en
+    el directorio actual hay uno ajeno, el hook no corre aquí por mucho que el
+    instalador dijera «✅ instalado». Devuelve (capa, comando)."""
+    import json
+    import os
+
+    # De más a menos prioridad. Manda la PRIMERA capa que defina un statusLine,
+    # sea de quien sea: si esa es la nuestra no hay conflicto, y las de debajo
+    # dan igual porque ya no se leen.
+    for name in ("settings.local.json", "settings.json"):
+        path = os.path.join(os.getcwd(), ".claude", name)
+        try:
+            with open(path) as f:
+                line = json.load(f).get("statusLine")
+            cmd = line.get("command") if isinstance(line, dict) else None
+        except Exception:
+            continue
+        if not isinstance(cmd, str):
+            continue
+        return None if cmd.endswith(HOOK) else (f".claude/{name}", cmd)
+    return None
+
+
 def _dump() -> int:
     from . import usage
     print("claude.json  :", "OK" if usage.from_claude_json() else "no disponible")
     print("statusLine   :", "OK" if usage.from_statusline() else "no configurado")
+    over = _statusline_override()
+    if over:
+        capa, cmd = over
+        print(f"  ⚠️  {capa} de este directorio define su propio statusLine:")
+        print(f"        {cmd}")
+        print("      Las settings del proyecto ganan sobre ~/.claude/settings.json, así que")
+        print("      aquí el hook de Claude Pet NO se ejecuta, esté instalado o no.")
+        print("      Quítalo de ahí, o haz que ese comando llame también a statusline-pet.py.")
 
     data = usage.best()
     if data is None:

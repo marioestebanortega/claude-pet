@@ -2020,10 +2020,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         exit(0)
     }
 
+    /// El `statusLine` que manda no es siempre el del usuario: las settings del
+    /// proyecto (`.claude/settings.json`, y la `.local` por encima) ganan sobre
+    /// `~/.claude/settings.json`, que es donde escriben nuestros instaladores.
+    /// Si en el directorio actual hay uno ajeno, el hook no corre aquí por mucho
+    /// que el instalador dijera «✅ instalado», y la mascota se queda sin datos
+    /// frescos sin que nada explique por qué. Devuelve la capa y el comando.
+    static func statusLineOverride() -> (layer: String, command: String)? {
+        func command(at url: URL) -> String? {
+            guard let d = try? Data(contentsOf: url),
+                  let root = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let line = root["statusLine"] as? [String: Any],
+                  let cmd = line["command"] as? String else { return nil }
+            return cmd
+        }
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        // De más a menos prioridad. Manda la PRIMERA capa que defina un
+        // statusLine, sea de quien sea: si esa es la nuestra no hay conflicto,
+        // y las de debajo dan igual porque ya no se leen.
+        for name in ["settings.local.json", "settings.json"] {
+            let url = cwd.appendingPathComponent(".claude").appendingPathComponent(name)
+            guard let cmd = command(at: url) else { continue }
+            return cmd.hasSuffix("statusline-pet.py") ? nil : (".claude/" + name, cmd)
+        }
+        return nil
+    }
+
     /// Modo diagnóstico: `ClaudePet.app/Contents/MacOS/ClaudePet --dump`
     static func dumpAndExit() -> Never {
         print("claude.json  :", LocalUsage.fromClaudeJSON() != nil ? "OK" : "no disponible")
         print("statusLine   :", LocalUsage.fromStatusLine() != nil ? "OK" : "no configurado")
+        if let over = statusLineOverride() {
+            print("  ⚠️  \(over.layer) de este directorio define su propio statusLine:")
+            print("        \(over.command)")
+            print("      Las settings del proyecto ganan sobre ~/.claude/settings.json, así que")
+            print("      aquí el hook de Claude Pet NO se ejecuta, esté instalado o no.")
+            print("      Quítalo de ahí, o haz que ese comando llame también a statusline-pet.py.")
+        }
         if let u = LocalUsage.best() {
             print("fuente elegida:", u.source, "|", Fmt.ago(u.fetchedAt))
             for l in u.limits {
