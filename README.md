@@ -34,7 +34,7 @@ el mismo y no pasa por Gatekeeper.
 ### Ubuntu
 
 ```bash
-sudo apt install ./dist/claudepet_1.2_all.deb
+sudo apt install ./dist/claudepet_1.3_all.deb
 claudepet &
 ```
 
@@ -46,7 +46,7 @@ Las versiones de macOS y Linux avanzan por separado.
 
 ```
 82f3cb65383156fda1f416cbb442aabd44aed85eac028f8a7ba0988e38a8024f  ClaudePet-1.0.zip
-f0a2652a67ff1e230ce5473371b77d6ed82c063367308723c16fb0fb9b8a239e  claudepet_1.2_all.deb
+fadc7273f6d406b93b992b5beb2dd8153e0025eeccf8b26730ef8592a70c711a  claudepet_1.3_all.deb
 ```
 
 ```bash

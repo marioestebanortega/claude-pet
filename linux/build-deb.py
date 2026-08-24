@@ -14,7 +14,7 @@ import sys
 import tarfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VERSION = "1.2"
+VERSION = "1.3"
 PKG = "claudepet"
 
 CONTROL = f"""Package: {PKG}

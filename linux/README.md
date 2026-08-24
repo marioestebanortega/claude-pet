@@ -8,7 +8,7 @@ exclusivos de Darwin.
 ## Instalar en Ubuntu
 
 ```bash
-sudo apt install ./claudepet_1.2_all.deb
+sudo apt install ./dist/claudepet_1.3_all.deb   # desde la raíz del repo
 claudepet &
 ```
 

@@ -25,7 +25,7 @@ Ejecuta `uname -s`:
 
 ## 1b. Ubuntu/Linux
 1. Si hay `apt` y existe el `.deb`, instálalo (resuelve solas las dependencias
-   GTK/AppIndicator): `sudo apt install ./dist/claudepet_1.2_all.deb` y luego
+   GTK/AppIndicator): `sudo apt install ./dist/claudepet_1.3_all.deb` y luego
    lánzalo con `claudepet &`.
 2. Si no quieres usar el `.deb`, córrelo desde la fuente:
    `cd linux && python3 -m claudepet &` (necesita `python3-gi`, `python3-gi-cairo`,
