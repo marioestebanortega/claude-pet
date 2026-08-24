@@ -1614,7 +1614,7 @@ struct MascotView: View {
                     .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
                     .padding(size * 0.028)
             }
-            if showRing && !busy {
+            if showRing {
                 if hasSecondary {
                     ProgressRing(pct: weekPct, lineWidth: outerWidth)
                     ProgressRing(pct: sessionPct, lineWidth: innerWidth, inset: innerInset)
