@@ -24,10 +24,12 @@ Ejecuta `uname -s`:
 3. Verifica que corre: `pgrep -x ClaudePet` debe devolver un PID.
 
 ## 1b. Ubuntu/Linux
-1. Si hay `apt` y existe el `.deb`, instálalo (resuelve solas las dependencias
-   GTK/AppIndicator): `sudo apt install ./dist/claudepet_1.3_all.deb` y luego
-   lánzalo con `claudepet &`.
-2. Si no quieres usar el `.deb`, córrelo desde la fuente:
+1. Genera e instala desde el fuente con `./install-linux.sh`.
+   El script llama a `python3 linux/build-deb.py` (genera el `.deb`),
+   lo instala con `apt` (resuelve las dependencias GTK/AppIndicator solo)
+   e instala el hook de statusLine opcionalmente.
+   No hay `.deb` precompilado en el repo: siempre se genera en el momento.
+2. Si preferís correrlo sin instalar:
    `cd linux && python3 -m claudepet &` (necesita `python3-gi`, `python3-gi-cairo`,
    `gir1.2-gtk-3.0` y un indicador de bandeja Ayatana/AppIndicator).
 
