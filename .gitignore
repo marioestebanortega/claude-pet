@@ -56,7 +56,6 @@ __pycache__/
 .venv/
 venv/
 
-# ── dist/ SÍ se versiona ──────────────────────────────────────
-# Son artefactos regenerables, pero mientras no haya una página de
-# releases es la forma de que un `git clone` traiga algo ejecutable.
-!dist/
+# ── dist/ se regenera, no se versiona ────────────────────────
+# Usar ./install-linux.sh (Ubuntu) o ./build.sh (macOS) para generarlos.
+dist/
