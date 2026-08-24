@@ -7,17 +7,51 @@ exclusivos de Darwin.
 
 ## Instalar en Ubuntu
 
+**Sin root**, que es lo normal para una app de bandeja de un solo usuario:
+
 ```bash
-sudo apt install ./dist/claudepet_1.3_all.deb   # desde la raíz del repo
-claudepet &
+./install-linux.sh --user        # desde la raíz del repo
+./install-linux.sh --user off    # y así se quita
+```
+
+La app no necesita permisos de administrador para nada: todo lo que escribe está en tu
+HOME (`~/.config/claudepet/state.json` y `~/.config/autostart`), y de `~/.claude.json`
+solo lee.
+
+Deja el mismo reparto que el `.deb` pero bajo `~/.local`: el paquete en
+`lib/claudepet/claudepet`, el hook a su lado (donde lo busca `--install-statusline`), el
+lanzador en `bin/claudepet` y el `.desktop` con su icono en `share/`, así que sale en el
+menú de aplicaciones igual.
+
+Lo único que no instala son las dependencias del escritorio, porque esas sí viven en
+`/usr`. Suelen venir de serie en Ubuntu; si te faltan, `--dump` sigue funcionando y la
+bandeja te dice cuál pedir:
+
+```bash
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
+                 gir1.2-ayatanaappindicator3-0.1
+```
+
+### Con `apt`, para toda la máquina
+
+Solo si quieres el paquete instalado para todos los usuarios, o poder quitarlo y
+actualizarlo con `apt`. Aquí sí hay una contraseña, y no es de la app: es `apt`, que
+escribe en `/usr` y en la base de datos de dpkg.
+
+```bash
+./install-linux.sh                              # genera el .deb y lo instala
+sudo apt install ./dist/claudepet_1.3_all.deb   # o a mano, si ya lo generaste
 ```
 
 `apt` resuelve las dependencias solo (`python3-gi`, `python3-gi-cairo` y el indicador
-de bandeja).
+de bandeja). Se quita con `sudo apt remove claudepet`.
 
 ```bash
 claudepet --autostart        # arrancar al iniciar sesión (off para quitarlo)
 ```
+
+Esto último no pide contraseña en ninguno de los dos modos: es una entrada `.desktop` en
+`~/.config/autostart`.
 
 ## El hook de `statusLine` (recomendado)
 

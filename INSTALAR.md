@@ -21,6 +21,27 @@ Para verificarlo en cualquier momento:
 ClaudePet.app/Contents/MacOS/ClaudePet --dump
 ```
 
+(La tabla de arriba es de macOS: TCC, Automatización y compañía son cosa de Darwin.)
+
+---
+
+## En Ubuntu
+
+La versión de Linux se instala **sin root**:
+
+```bash
+./install-linux.sh --user        # en ~/.local, sin sudo
+./install-linux.sh --user off    # y así se quita
+```
+
+No pide permisos de administrador ni para instalarse ni para funcionar: escribe solo en
+`~/.config/claudepet/` y `~/.config/autostart`, y de `~/.claude.json` solo lee. El aviso
+de la consulta automática sale por `notify-send`, que tampoco pide autorización.
+
+Hay un segundo camino, el `.deb` gestionado por `apt`, que sí pide la contraseña una vez
+—no por la app, sino porque `apt` escribe en `/usr`—. Elígelo solo si lo quieres para
+todos los usuarios de la máquina. Detalle en [`linux/README.md`](linux/README.md).
+
 ---
 
 ## Opción A — compilarla (recomendada)

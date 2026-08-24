@@ -33,10 +33,23 @@ y evita Gatekeeper por completo.
 ### Ubuntu
 
 ```bash
-./install-linux.sh
+./install-linux.sh --user     # en ~/.local, sin sudo
 ```
 
-Genera el `.deb` desde el fuente, lo instala con `apt` e instala el hook de `statusLine`.
+**No hace falta root.** Claude Pet no necesita permisos de administrador ni para
+instalarse ni para funcionar: todo lo que escribe está en tu HOME
+(`~/.config/claudepet/`) y de `~/.claude.json` solo lee. El modo `--user` es igual de
+completo —sale en el menú de aplicaciones con su icono, y arranca al iniciar sesión— y se
+quita con `./install-linux.sh --user off`.
+
+```bash
+./install-linux.sh            # alternativa: .deb en /usr, gestionado por apt
+```
+
+Este segundo camino sí pide la contraseña una vez, y no por la app: es `apt`, que escribe
+en `/usr` y en la base de datos de dpkg. Elígelo solo si quieres el paquete instalado para
+todos los usuarios de la máquina o actualizarlo con `apt`. Los dos generan el `.deb` desde
+el fuente y ofrecen instalar el hook de `statusLine`.
 Versión en Python con applet de bandeja: ver [`linux/README.md`](linux/README.md). La app
 de macOS no se puede portar (SwiftUI, AppKit y compañía son exclusivos de Darwin).
 Las versiones de macOS y Linux avanzan por separado.
