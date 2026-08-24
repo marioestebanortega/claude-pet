@@ -43,6 +43,50 @@ Si tienes varias sesiones de Claude Code abiertas, todas escriben el mismo
 `pet-usage.json`; el hook funde las cifras en vez de sobrescribirlas y la app descarta
 las ventanas ya vencidas, así que se ve un solo número coherente.
 
+## Con Claude Code cerrado
+
+El hook solo corre mientras hay una sesión abierta, así que al cerrar Claude Code la cifra
+se congela. No es un fallo —con Claude Code cerrado tu cuota tampoco se mueve—, pero la
+ventana de 5 h y la de 7 días siguen avanzando y el dato envejece.
+
+Por eso Clawd pide `/usage` él solo cuando hace falta. El interruptor está en la bandeja
+y en el clic derecho de la mascota (que con `--pet` es el único que hay), en «Consultar
+/usage sola (no gasta tokens)», y viene encendido:
+
+| Plan | Cuándo dispara |
+|---|---|
+| Pro/Max | solo si el dato pasa de 15 min, o si las cifras llevan ese rato clavadas aunque el hook siga escribiendo (`changed_at_ms`) |
+| Team/Enterprise | cada vez que toca el temporizador: esos planes no publican `rate_limits`, así que no hay ninguna fuente que se refresque sola |
+| Sin datos | siempre: preguntar es lo único que puede resolverlo |
+
+Con Claude Code abierto alimentando `pet-usage.json` el temporizador salta sin arrancar
+nada. El selector «Cada cuánto» (1 / 2 / 5 min) solo aparece en Team/Enterprise: en
+Pro/Max no manda, porque dos consultas no pueden caer más juntas que los 15 minutos de
+`STALE_AFTER`.
+
+`/usage` no gasta tokens —el CLI lo resuelve sin un turno del modelo: `num_turns` 0,
+`total_cost_usd` 0 con `--output-format json`—; lo que cuesta es arrancar el CLI entero.
+Medido aquí con `/usr/bin/time`, tres corridas:
+
+| | real | CPU (user+sys) | pico de RAM |
+|---|---|---|---|
+| 1 | 2,18 s | 1,29 s | 402 MB |
+| 2 | 1,61 s | 0,82 s | 406 MB |
+| 3 | 1,66 s | 0,82 s | 368 MB |
+
+Son ~0,98 s de CPU por consulta, o sea ~0,1 % de un núcleo en Pro/Max (una cada 15 min) y
+hasta ~1,6 % si en Team/Enterprise se pone el intervalo en un minuto. El menú enseña esa
+cifra debajo del interruptor para que la decisión no sea a ciegas. Para comparar: la
+mascota flotante animada gasta bastante más, y eso se mide con `./medir-cpu.sh`.
+
+La primera vez que consulta sola avisa con una notificación de escritorio
+(`notify-send`; si no está `libnotify-bin`, con un diálogo). Es lo que evita que una
+acción automática sorprenda, y por eso el interruptor viene encendido en vez de venir
+apagado donde no lo encontraría nadie.
+
+Los tres ajustes viven en `~/.config/claudepet/state.json`: `auto_force_enabled`,
+`auto_force_seconds` y `auto_force_notified`.
+
 ## Sin instalar nada
 
 ```bash
@@ -75,7 +119,7 @@ badge con `sesión/semana %`.
 | Arrastrar | la mueve |
 | Clic izquierdo | saluda, y de paso relee los archivos |
 | Pasar el ratón | sesión, semana y antigüedad del dato |
-| Clic derecho | ocultar, actualizar, forzar (`/usage`), traer a esta pantalla, salir |
+| Clic derecho | ocultar, actualizar, forzar (`/usage`), consultar `/usage` sola, traer a esta pantalla, salir |
 
 Se esconde y se saca desde la bandeja, con «Mascota en el escritorio». Lo visible y su
 posición se guardan en `~/.config/claudepet/state.json`.
@@ -104,8 +148,10 @@ a mano en vez de llamar a `dpkg-deb`.
 
 ```
 claudepet/usage.py     lectura y fusión de fuentes — solo librería estándar
+claudepet/state.py     ajustes en ~/.config/claudepet/state.json — sin dependencias
+claudepet/runner.py    lanza `claude -p /usage` y las notificaciones — sin GTK
 claudepet/sprite.py    Clawd en pixel-art + escritor de PNG con zlib
-claudepet/hub.py       un solo temporizador y una sola lectura para todos
+claudepet/hub.py       temporizadores (releer, y pedir /usage sola) y lectura única
 claudepet/tray.py      el applet de bandeja (GTK + AppIndicator)
 claudepet/pet.py       la mascota flotante: dibujo con Cairo + ventana
 claudepet/app.py       arranque: junta bandeja y mascota en un Gtk.main()

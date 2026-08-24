@@ -26,8 +26,12 @@ for name, version in (("AyatanaAppIndicator3", "0.1"), ("AppIndicator3", "0.1"))
         continue
 
 from . import sprite, usage  # noqa: E402
+from .hub import AUTO_FORCE_CPU_SECONDS, AUTO_FORCE_OPTIONS  # noqa: E402
 
 APP_ID = "claudepet"
+
+# Cómo se lee cada intervalo del selector.
+AUTO_FORCE_LABELS = {60: "cada minuto", 120: "cada 2 min", 300: "cada 5 min"}
 
 
 class Tray:
@@ -99,6 +103,8 @@ class Tray:
         self._force_item.connect("activate", lambda *_: self.hub.force_usage(self._on_force_state))
         self.menu.append(self._force_item)
 
+        self._build_auto_items()
+
         self.menu.append(Gtk.SeparatorMenuItem())
 
         quit_item = Gtk.MenuItem(label="Salir de Claude Pet")
@@ -108,6 +114,78 @@ class Tray:
         self.menu.show_all()
         for item in self.items:
             item.hide()
+        self._render_auto()
+
+    # ── Consulta automática ──────────────────────────────────
+    def _build_auto_items(self) -> None:
+        """Lo mismo que el panel de macOS, en forma de menú.
+
+        Con Claude Code cerrado nada refresca la cifra: en Team/Enterprise
+        porque el plan no publica `rate_limits`, y en Pro/Max porque quien los
+        escribe es el hook de `statusLine`, que solo corre mientras haya una
+        sesión abierta. `/usage` no gasta tokens, pero cada consulta arranca el
+        CLI entero: de ahí el interruptor.
+        """
+        self._auto_item = Gtk.CheckMenuItem(label="Consultar /usage sola (no gasta tokens)")
+        self._auto_item.set_active(self.hub.auto_force_enabled)
+        self._auto_item.connect("toggled", self._toggle_auto)
+        self.menu.append(self._auto_item)
+
+        # El selector de intervalo solo sale en los planes donde manda de verdad
+        # (ver `_render_auto`): en Pro/Max la consulta solo dispara con el dato
+        # viejo, así que el intervalo real lo fija `STALE_AFTER` y no esto.
+        self._auto_interval = Gtk.MenuItem(label="Cada cuánto")
+        submenu = Gtk.Menu()
+        group: list = []
+        for seconds in AUTO_FORCE_OPTIONS:
+            item = Gtk.RadioMenuItem(label=AUTO_FORCE_LABELS.get(seconds, f"cada {seconds} s"))
+            item.join_group(group[0] if group else None)
+            group.append(item)
+            item.set_active(seconds == self.hub.auto_force_seconds)
+            item.connect("toggled", self._pick_interval, seconds)
+            submenu.append(item)
+        self._auto_interval.set_submenu(submenu)
+        self.menu.append(self._auto_interval)
+
+        self._auto_hint = Gtk.MenuItem(label="")
+        self._auto_hint.set_sensitive(False)
+        self.menu.append(self._auto_hint)
+
+    def _toggle_auto(self, item) -> None:
+        self.hub.set_auto_force(item.get_active())
+        self._render_auto()
+
+    def _pick_interval(self, item, seconds: int) -> None:
+        if item.get_active():
+            self.hub.set_auto_force_seconds(seconds)
+            self._render_auto()
+
+    def _auto_cost(self) -> str:
+        """Lo que cuesta de verdad, medido en esta máquina. Se enseña para que
+        la decisión no sea a ciegas: en Pro/Max el intervalo del selector no
+        manda, porque dos consultas no pueden caer más juntas que `STALE_AFTER`."""
+        secs = max(60, self.hub.auto_force_seconds)
+        free = self.data is not None and self.data.has_free_source
+        real = max(secs, usage.STALE_AFTER) if free else secs
+        pct = f"{AUTO_FORCE_CPU_SECONDS / real * 100:.1f}".replace(".", ",")
+        return f"~{pct} % de un núcleo"
+
+    def _render_auto(self) -> None:
+        on = self.hub.auto_force_enabled
+        # El mismo interruptor está en el menú de la mascota: si se tocó allí,
+        # esto lo pone al día en el siguiente sondeo.
+        if self._auto_item.get_active() != on:
+            self._auto_item.handler_block_by_func(self._toggle_auto)
+            self._auto_item.set_active(on)
+            self._auto_item.handler_unblock_by_func(self._toggle_auto)
+        free = self.data is not None and self.data.has_free_source
+        self._auto_interval.set_visible(on and not free)
+        self._auto_hint.set_visible(on)
+        if not on:
+            return
+        self._auto_hint.set_label(
+            f"↳ solo con Claude Code cerrado, si el dato pasa de 15 min · {self._auto_cost()}"
+            if free else f"↳ {self._auto_cost()}")
 
     # ── Refresco ─────────────────────────────────────────────
     def _on_data(self, data, changed: bool) -> None:
@@ -126,6 +204,7 @@ class Tray:
                 self._icon_path(usage.MOOD_COLORS["broken"][0]), "Claude Pet"
             )
             self._render_freshness()
+            self._render_auto()
             return
 
         night = _is_night()
@@ -143,6 +222,7 @@ class Tray:
         rows.append(f"— humor: {mood}" + ("  ·  🌙 modo noche" if night else ""))
         self._show_rows(rows)
         self._render_freshness()
+        self._render_auto()
 
     def _render_freshness(self) -> None:
         if self.data is None:

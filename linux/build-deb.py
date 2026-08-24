@@ -17,12 +17,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERSION = "1.3"
 PKG = "claudepet"
 
+# `libnotify-bin` va en Recommends y no en Depends: solo se usa para el aviso de
+# la primera consulta automática, y sin él la app cae a un diálogo de GTK.
 CONTROL = f"""Package: {PKG}
 Version: {VERSION}
 Section: utils
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.9), python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1
+Recommends: libnotify-bin
 Maintainer: Mario Ortega <67158937+marioestebanortega@users.noreply.github.com>
 Description: Mascota que vigila tu consumo de Claude Code
  Applet de bandeja que muestra cuanta cuota de Claude Code llevas gastada,

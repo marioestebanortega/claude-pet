@@ -10,13 +10,16 @@ import fcntl
 import os
 import sys
 import tempfile
+import threading
 
 import gi
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk  # noqa: E402
 
+from . import runner  # noqa: E402
 from .hub import Hub  # noqa: E402
+from .state import load_state  # noqa: E402
 
 APP_ID = "claudepet"
 _lock = None                                   # vivo mientras dure el proceso
@@ -46,6 +49,32 @@ def _single_instance() -> bool:
     return True
 
 
+def _notice(title: str, body: str) -> None:
+    """El aviso de la primera consulta automática.
+
+    `notify-send` en un hilo (bloquea si no hay demonio de notificaciones) y, si
+    no se pudo dar, un diálogo de GTK: el aviso es lo que evita que la consulta
+    sola sorprenda, así que no puede perderse en silencio por no tener
+    instalado `libnotify-bin`.
+    """
+    def work() -> None:
+        if runner.notify(title, body):
+            return
+        GLib.idle_add(_notice_dialog, title, body)
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def _notice_dialog(title: str, body: str) -> bool:
+    dialog = Gtk.MessageDialog(
+        transient_for=None, modal=False, message_type=Gtk.MessageType.INFO,
+        buttons=Gtk.ButtonsType.OK, text=title, secondary_text=body)
+    dialog.set_title("Claude Pet")
+    dialog.connect("response", lambda d, _r: d.destroy())
+    dialog.show_all()
+    return False                               # idle_add: correr una vez
+
+
 def run(show_tray: bool = True, show_pet: bool | None = None) -> int:
     """`show_pet` a None = lo que diga el estado guardado."""
     if not _single_instance():
@@ -58,12 +87,13 @@ def run(show_tray: bool = True, show_pet: bool | None = None) -> int:
     GLib.set_application_name("Claude Pet")
 
     hub = Hub()
+    hub.on_auto_notice = _notice
     pet = tray = None
 
     if show_pet is not False:
         from . import pet as petmod
         if show_pet is None:
-            show_pet = petmod.load_state().get("pet_visible", True)
+            show_pet = load_state().get("pet_visible", True)
         pet = petmod.PetWindow(hub, on_quit=Gtk.main_quit)
 
     if show_tray:

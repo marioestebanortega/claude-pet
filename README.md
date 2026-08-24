@@ -76,6 +76,10 @@ tokens** (ver más abajo) y no dispara mientras el hook esté alimentando el arc
 Claude Code abierto, cero procesos. Sale a ~0,1 % de un núcleo. Se apaga en el panel con
 «Consultar /usage sola».
 
+En Ubuntu funciona igual, con el mismo interruptor en el menú de la bandeja; ahí el coste
+medido es ~0,98 s de CPU y ~400 MB de pico por consulta, que a una cada 15 minutos son
+los mismos ~0,1 % de un núcleo.
+
 ## Permisos
 
 Sin red, sin Automatización, sin Accesibilidad, sin acceso a archivos protegidos. Solo

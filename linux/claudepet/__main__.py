@@ -36,6 +36,28 @@ def _statusline_override() -> tuple[str, str] | None:
     return None
 
 
+def _dump_auto(data) -> None:
+    """Estado de la consulta automática de `/usage`, que es lo que mantiene la
+    cifra viva con Claude Code cerrado. Se lee del estado en disco y no del hub,
+    para no importar GTK aquí."""
+    from . import usage
+    from .state import load_state
+    st = load_state()
+    on = st.get("auto_force_enabled", True)
+    print("\nConsulta automática de /usage (no gasta tokens):",
+          "encendida" if on else "apagada")
+    if not on:
+        return
+    if data is None or not data.has_free_source:
+        secs = st.get("auto_force_seconds", 300)
+        print(f"  Tu plan no publica rate_limits, así que pregunta cada {int(secs) // 60} min.")
+        return
+    frozen = usage.figures_look_frozen()
+    print(f"  Solo si el dato pasa de {usage.STALE_AFTER // 60} min: "
+          f"ahora hace {int(data.age)} s"
+          + (" y las cifras llevan rato clavadas → tocaría preguntar" if frozen else ""))
+
+
 def _dump() -> int:
     from . import usage
     print("claude.json  :", "OK" if usage.from_claude_json() else "no disponible")
@@ -52,6 +74,7 @@ def _dump() -> int:
     data = usage.best()
     if data is None:
         print("SIN DATOS →", usage.empty_reason())
+        _dump_auto(None)
         return 1
 
     from datetime import datetime
@@ -62,6 +85,8 @@ def _dump() -> int:
             reset = "se reinicia " + datetime.fromtimestamp(limit.resets_at).strftime("%a %d %H:%M")
         print(f"  {limit.label:<26} {limit.percent:>3}%  {limit.detail or '':<22} {reset}")
     print(f"peor = {data.worst} → humor {usage.mood_for(data.worst)}")
+
+    _dump_auto(data)
 
     print("\nPermisos que usa esta app:")
     print(f"  Archivos : solo {usage.CLAUDE_JSON} y {usage.STATUSLINE_JSON}")

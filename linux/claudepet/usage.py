@@ -94,6 +94,13 @@ class Usage:
         return top[1].percent if len(top) > 1 else 0
 
     @property
+    def has_free_source(self) -> bool:
+        """Si el plan publica `rate_limits` (Pro/Max) hay una fuente que se
+        refresca sola y gratis... mientras Claude Code esté abierto, porque la
+        escribe el hook de `statusLine`. Team/Enterprise no la tiene nunca."""
+        return self.session is not None or self.weekly is not None
+
+    @property
     def has_secondary(self) -> bool:
         """true si hay una segunda ventana real que mostrar. Con una sola
         dimensión, la UI compacta enseña un número en vez de inventar una
@@ -417,6 +424,37 @@ def best() -> Usage | None:
         else:
             merged.limits.append(f)
     return merged
+
+
+def statusline_changed_at() -> float | None:
+    """Cuándo se movieron por última vez los porcentajes del hook.
+
+    No es lo mismo que `written_at_ms`: el hook reescribe el archivo cada ~10 s
+    con marca nueva aunque las cifras no hayan cambiado, porque Claude Code las
+    refresca a saltos. Por eso `fetched_at` nunca envejece mientras haya una
+    sesión viva, y sin esta segunda señal no se distingue "recién escrito" de
+    "recién actualizado".
+
+    Devuelve None si el hook es de una versión anterior a `changed_at_ms`: ahí
+    no se sabe, y no saber no debe disparar nada.
+    """
+    root = _load(STATUSLINE_JSON)
+    ms = (root or {}).get("changed_at_ms")
+    return ms / 1000 if isinstance(ms, (int, float)) else None
+
+
+def figures_look_frozen() -> bool:
+    """Las cifras llevan clavadas más de lo que dura una ventana de frescura,
+    aunque el archivo se siga reescribiendo.
+
+    Puede ser que Claude Code no las haya refrescado... o que simplemente no
+    estés consumiendo nada: desde el archivo no se distingue. Por eso esto solo
+    sirve para ir a preguntar con `/usage` —que es barato y resuelve la duda— y
+    nunca para pintar el dato como viejo, que daría un falso positivo cada vez
+    que te levantas a comer.
+    """
+    changed = statusline_changed_at()
+    return changed is not None and time.time() - changed > STALE_AFTER
 
 
 def claude_code_active(within: float = ACTIVE_WITHIN) -> bool:

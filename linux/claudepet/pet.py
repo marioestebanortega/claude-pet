@@ -12,13 +12,13 @@ SwiftUI.
 """
 from __future__ import annotations
 
-import json
 import math
 import os
 
 import cairo
 
 from . import sprite, usage
+from .state import load_state, update_state
 
 # ─────────────────────────────────────────────────────────────
 # Proporciones (MascotView de macOS, verificadas contra la referencia)
@@ -53,8 +53,6 @@ BADGE_FAMILY = "Ubuntu"                    # fontconfig sustituye si no está
 BUBBLE_H = 66.0                            # hueco para el bocadillo, encima
 DESIGN = 96.0
 POKE_SECONDS = 2.8
-
-STATE = os.path.expanduser("~/.config/claudepet/state.json")
 
 
 def _rgb(value: int) -> tuple[float, float, float]:
@@ -230,30 +228,6 @@ def _bubble(cr, cx: float, bottom: float, size: float, text: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────
-# Estado en disco
-# ─────────────────────────────────────────────────────────────
-
-def load_state() -> dict:
-    try:
-        with open(STATE) as f:
-            got = json.load(f)
-        return got if isinstance(got, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def save_state(state: dict) -> None:
-    try:
-        os.makedirs(os.path.dirname(STATE), exist_ok=True)
-        tmp = STATE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(state, f)
-        os.replace(tmp, STATE)                 # escritura atómica
-    except OSError:
-        pass
-
-
-# ─────────────────────────────────────────────────────────────
 # Volcado a PNG (sin pantalla)
 # ─────────────────────────────────────────────────────────────
 
@@ -346,12 +320,32 @@ class PetWindow(Gtk.Window):
             item = Gtk.MenuItem(label=label)
             item.connect("activate", handler)
             menu.append(item)
+
+        # También aquí, y no solo en la bandeja: con `--pet` no hay bandeja, y
+        # sin este interruptor la consulta automática no se podría apagar.
+        self._auto_item = Gtk.CheckMenuItem(label="Consultar /usage sola (no gasta tokens)")
+        self._auto_item.set_active(self.hub.auto_force_enabled)
+        self._auto_item.connect("toggled", self._toggle_auto)
+        menu.append(self._auto_item)
+
         menu.append(Gtk.SeparatorMenuItem())
         quit_item = Gtk.MenuItem(label="Salir de Claude Pet")
         quit_item.connect("activate", lambda *_: (self.on_quit or Gtk.main_quit)())
         menu.append(quit_item)
         menu.show_all()
         return menu
+
+    def _toggle_auto(self, item) -> None:
+        self.hub.set_auto_force(item.get_active())
+
+    def _sync_auto_item(self) -> None:
+        """El mismo interruptor está en la bandeja: al abrir este menú hay que
+        reflejar lo que diga el hub, que es quien manda."""
+        want = self.hub.auto_force_enabled
+        if self._auto_item.get_active() != want:
+            self._auto_item.handler_block_by_func(self._toggle_auto)
+            self._auto_item.set_active(want)
+            self._auto_item.handler_unblock_by_func(self._toggle_auto)
 
     # ── Colocación ───────────────────────────────────────────
     def _default_position(self) -> tuple[int, int]:
@@ -400,23 +394,17 @@ class PetWindow(Gtk.Window):
 
     def _remember(self, x: int, y: int) -> bool:
         self._save_id = 0
-        state = load_state()
-        state.update({"x": int(x), "y": int(y)})
-        save_state(state)
+        update_state(x=int(x), y=int(y))
         return False                          # no repetir
 
     # ── Visibilidad ──────────────────────────────────────────
     def show_pet(self) -> None:
-        state = load_state()
-        state["pet_visible"] = True
-        save_state(state)
+        update_state(pet_visible=True)
         self.show_all()
         self.present()
 
     def hide_pet(self) -> None:
-        state = load_state()
-        state["pet_visible"] = False
-        save_state(state)
+        update_state(pet_visible=False)
         self.hide()
 
     # ── Datos y animación ────────────────────────────────────
@@ -460,6 +448,7 @@ class PetWindow(Gtk.Window):
     # ── Eventos ──────────────────────────────────────────────
     def on_click(self, _w, event) -> bool:
         if event.button == 3:
+            self._sync_auto_item()
             self.menu.popup_at_pointer(event)
             return True
         if event.button == 1:
