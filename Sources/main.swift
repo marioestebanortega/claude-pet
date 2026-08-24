@@ -1622,13 +1622,6 @@ struct MascotView: View {
                     ProgressRing(pct: sessionPct, lineWidth: outerWidth)
                 }
             }
-            if busy {
-                Circle()
-                    .trim(from: 0, to: 0.18)
-                    .stroke(mood.color.opacity(0.9),
-                            style: StrokeStyle(lineWidth: outerWidth, lineCap: .round))
-                    .rotationEffect(.degrees(spin))
-            }
             // Clawd tiene que caber DENTRO del anillo interior, de ahí el 0.48.
             ClawdView(mood: mood, activity: activity, night: night,
                       clawdWidth: size * 0.48, tinted: tinted, sick: sick, old: old)
