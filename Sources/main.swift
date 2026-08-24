@@ -910,7 +910,7 @@ final class PetStore: ObservableObject {
                         title: "Clawd consulta tu uso solo",
                         body: "Tu plan no publica la cuota gratis, así que Clawd la pide con «/usage» cada tanto. No gasta tokens; el intervalo y el interruptor están en el panel.")
                 }
-                self.forceRefresh()
+                self.forceRefresh(silent: true)
             }
         }
     }
@@ -1020,16 +1020,16 @@ final class PetStore: ObservableObject {
     }
 
     /// Único camino que habla con el servidor (`/usage`), y solo si se pide.
-    func forceRefresh() {
+    func forceRefresh(silent: Bool = false) {
         guard !forcing else { return }
         forcing = true
-        say("Preguntándole al servidor… 📡")
+        if !silent { say("Preguntándole al servidor… 📡") }
         Task.detached(priority: .utility) {
             let err = ClaudeRunner.forceRefresh()
             await MainActor.run {
                 self.forcing = false
                 if let err { self.errorMsg = err }
-                self.reload(announce: true)
+                self.reload(announce: !silent)
             }
         }
     }
