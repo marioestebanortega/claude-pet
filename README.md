@@ -52,7 +52,26 @@ todos los usuarios de la máquina o actualizarlo con `apt`. Los dos generan el `
 el fuente y ofrecen instalar el hook de `statusLine`.
 Versión en Python con applet de bandeja: ver [`linux/README.md`](linux/README.md). La app
 de macOS no se puede portar (SwiftUI, AppKit y compañía son exclusivos de Darwin).
-Las versiones de macOS y Linux avanzan por separado.
+
+### Windows
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
+```
+
+**Tampoco hace falta administrador**, ni para instalarlo ni para que funcione: todo lo
+que escribe está en tu perfil (`%LOCALAPPDATA%\Programs\ClaudePet` y
+`%APPDATA%\ClaudePet`) y de `~\.claude.json` solo lee. Sale en el menú de Inicio con su
+icono, puede arrancar al iniciar sesión, y se quita con
+`.\install-windows.ps1 off`.
+
+El `-ExecutionPolicy Bypass` no es opcional: el valor por defecto en Windows 11 es
+`Restricted`, que no deja ejecutar ningún script. Y si no tienes Python, el instalador lo
+pone él con `winget`, también en ámbito de usuario y sin pedir contraseña.
+
+Otra reescritura en Python, esta vez sobre Win32 con `ctypes` y sin dependencias de
+`pip`: ver [`windows/README.md`](windows/README.md). Ni la app de macOS ni la de Linux se
+podían portar aquí, así que las tres versiones avanzan por separado.
 
 ## El hook de `statusLine` (recomendado)
 
@@ -89,9 +108,10 @@ tokens** (ver más abajo) y no dispara mientras el hook esté alimentando el arc
 Claude Code abierto, cero procesos. Sale a ~0,1 % de un núcleo. Se apaga en el panel con
 «Consultar /usage sola».
 
-En Ubuntu funciona igual, con el mismo interruptor en el menú de la bandeja; ahí el coste
-medido es ~0,98 s de CPU y ~400 MB de pico por consulta, que a una cada 15 minutos son
-los mismos ~0,1 % de un núcleo.
+En Ubuntu y en Windows funciona igual, con el mismo interruptor en el menú de la bandeja.
+El coste medido por consulta es ~0,98 s de CPU y ~400 MB de pico en Ubuntu, y ~1,43 s y
+~408 MB en Windows (crear un proceso es más caro ahí). A una cada 15 minutos siguen
+saliendo ~0,1 % y ~0,2 % de un núcleo.
 
 ## Permisos
 
@@ -174,5 +194,7 @@ statusline-pet.py        hook opcional de statusLine
 install-statusline.sh    instala/revierte el hook
 uninstall-statusline.sh
 start-at-login.sh        arrancar al iniciar sesión (--off para quitarlo)
-linux/                   versión para Ubuntu (Python) y su paquete .deb
+linux/                   versión para Ubuntu (Python + GTK) y su paquete .deb
+windows/                 versión para Windows (Python + Win32) y su .zip portable
+install-windows.ps1      instala en Windows, solo para tu usuario
 ```
