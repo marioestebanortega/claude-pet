@@ -82,92 +82,53 @@ Detalle en [`windows/README.md`](windows/README.md).
 
 ---
 
-## Opción A — compilarla (recomendada)
-
-Al compilarla en tu propia máquina no hay cuarentena ni Gatekeeper de por medio.
+## En macOS — compilar e instalar
 
 ```bash
 git clone <este-repo> && cd ClaudePet
-./build.sh
-open ClaudePet.app
+./build.sh && open ClaudePet.app
 ```
 
-Requisito único: las Command Line Tools de Apple (gratis, sin Xcode entero). Si faltan,
-`build.sh` te lo dice y se instalan con `xcode-select --install`.
+Requisito único: Command Line Tools (`xcode-select --install`). Compilar en local evita
+Gatekeeper por completo; no hace falta tocar `xattr`.
+
+Para empaquetar y compartir: `./package.sh` genera `ClaudePet-1.0.zip` con un
+`install.sh` que quita la cuarentena, copia a `/Applications` y ofrece instalar el hook.
 
 ---
 
-## Opción B — recibir el `.zip`
-
-`./package.sh` genera un `ClaudePet-1.0.zip` de ~200 KB con la app, este documento y un
-instalador. Para quien lo recibe es un solo paso:
-
-```bash
-bash ~/Downloads/install.sh
-```
-
-Copia la app a `/Applications`, le quita la cuarentena, la abre y pregunta si quiere que
-arranque al iniciar sesión. (Con `CLAUDEPET_DEST` se instala en otro sitio, p. ej.
-`~/Applications`.)
-
-**Hay que usar el instalador, no el doble clic.** La app va firmada *ad-hoc*, sin cuenta
-de desarrollador de Apple: al descargarla queda con el atributo de cuarentena y el
-diálogo que sale no ofrece «Abrir», solo «Mover a la papelera». El instalador lo
-resuelve con `xattr -dr com.apple.quarantine`, que es justo lo que el doble clic no
-puede hacer.
-
 ## Que muestre tu cuota
 
-Recién instalada, Clawd puede aparecer con **`0/0 %`**: todavía no tiene de dónde leer.
-Lee de dos sitios y al principio los dos pueden estar vacíos:
-
-- `~/.claude.json` → `cachedUsageUtilization`: lo escribe Claude Code solo, y puede tardar.
-- `~/.claude/pet-usage.json`: lo escribe el hook de `statusLine`, que **no se instala con
-  la app**.
-
-Instala el hook (gratis, sin red ni tokens):
+Recién instalada puede aparecer `0/0 %`. Instala el hook de `statusLine`:
 
 ```bash
-./install-statusline.sh   # engancha el hook en ~/.claude/settings.json (hace backup)
+# macOS / Linux
+./install-statusline.sh
+
+# Windows
+claudepet --install-statusline
+# o desde el fuente:
+cd windows && python -X utf8 -m claudepet --install-statusline
 ```
 
-> **Reinicia Claude Code después.** El `statusLine` se carga al arrancar, así que hasta
-> que no reinicies no empieza a escribir los datos.
+**Reinicia Claude Code después.** El hook empieza a escribir datos solo al arrancar.
 
-Para ver qué está leyendo, sin tocar nada:
-
+Para ver qué está leyendo:
 ```bash
-ClaudePet.app/Contents/MacOS/ClaudePet --dump
+ClaudePet.app/Contents/MacOS/ClaudePet --dump   # macOS
+claudepet --dump                                 # Linux / Windows (instalado)
+python -X utf8 -m claudepet --dump               # Windows (fuente), desde windows\
 ```
-
-> Si instalaste desde el `.zip`, `install.sh` ya te ofrece instalar el hook al final.
-
-### Diagnóstico en planes Team y Enterprise
-
-Esos planes se miden en dinero y no están probados con datos reales. Si algo no cuadra,
-este comando vuelca el bloque de cuota quitando todo lo que identifica a la cuenta
-(UUID, correos, tokens, ids):
-
-```bash
-ClaudePet.app/Contents/MacOS/ClaudePet --dump-raw
-```
-
-Salen unos 3 KB. Repasa la salida antes de mandarla: lleva tus porcentajes de uso y, si
-el plan va por dinero, los importes.
 
 ---
 
 ## Desinstalar
 
-```bash
-./start-at-login.sh --off             # quitar del arranque
-rm -rf /Applications/ClaudePet.app    # borrar la app
-```
+| Sistema | Comando |
+|---|---|
+| macOS | `./start-at-login.sh --off && rm -rf /Applications/ClaudePet.app` |
+| Linux | `./install-linux.sh --user off` |
+| Windows | `powershell -ExecutionPolicy Bypass -File .\install-windows.ps1 off` |
 
-No deja nada más: sus ajustes viven en `~/Library/Preferences/com.mario.claudepet.plist`
-y nunca escribe fuera de ahí. Si además instalaste el hook de statusLine,
-`./uninstall-statusline.sh` lo revierte.
-
-En Ubuntu es `./install-linux.sh --user off`, y en Windows
-`powershell -ExecutionPolicy Bypass -File .\install-windows.ps1 off`. Los dos preguntan
-si quitar también el hook y los dos conservan tus ajustes, por si vuelves.
+Para quitar solo el hook: `./uninstall-statusline.sh` (macOS/Linux) o
+`claudepet --install-statusline off` (Windows).

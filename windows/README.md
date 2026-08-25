@@ -102,41 +102,20 @@ se congela. No es un fallo —con Claude Code cerrado tu cuota tampoco se mueve�
 ventana de 5 h y la de 7 días siguen avanzando y el dato envejece.
 
 Por eso Clawd pide `/usage` él solo cuando hace falta. El interruptor está en la bandeja y
-en el clic derecho de la mascota (que con `--pet` es el único que hay), en «Consultar
-/usage sola (no gasta tokens)», y viene encendido:
+en el clic derecho de la mascota, en «Consultar /usage sola (no gasta tokens)», y viene
+encendido:
 
 | Plan | Cuándo dispara |
 |---|---|
-| Pro/Max | solo si el dato pasa de 15 min, o si las cifras llevan ese rato clavadas aunque el hook siga escribiendo (`changed_at_ms`) |
-| Team/Enterprise | cada vez que toca el temporizador: esos planes no publican `rate_limits`, así que no hay ninguna fuente que se refresque sola |
-| Sin datos | siempre: preguntar es lo único que puede resolverlo |
+| Pro/Max | solo si el dato pasa de 15 min (o las cifras llevan ese rato clavadas) |
+| Team/Enterprise | cada vez que toca el temporizador (esos planes no publican `rate_limits`) |
 
-`/usage` no gasta tokens —el CLI lo resuelve sin un turno del modelo: `num_turns` 0,
-`total_cost_usd` 0 con `--output-format json`—; lo que cuesta es arrancar el CLI entero.
-Medido aquí con `medir-cpu.ps1` en Windows 11 ARM64, tres corridas:
+`/usage` no gasta tokens; lo que cuesta es arrancar el CLI: ~1,43 s de CPU y ~410 MB de
+pico por consulta en Windows 11 ARM64 (más que Linux por el coste de crear procesos). El
+menú muestra el porcentaje equivalente debajo del interruptor. La mascota sola sale casi
+gratis: 0,03 s de CPU en 30 s y ~26 MB de RAM.
 
-| | reloj | CPU | pico de RAM |
-|---|---|---|---|
-| 1 | 4,94 s | 1,43 s | 407 MB |
-| 2 | 4,75 s | 1,50 s | 408 MB |
-| 3 | 3,82 s | 1,36 s | 410 MB |
-
-Son ~1,43 s de CPU por consulta —más que en Linux (0,98 s), porque crear un proceso en
-Windows es más caro—, o sea ~0,2 % de un núcleo en Pro/Max (una cada 15 min) y hasta
-~2,4 % si en Team/Enterprise se pone el intervalo en un minuto. El menú enseña esa cifra
-debajo del interruptor para que la decisión no sea a ciegas.
-
-La mascota animada, en cambio, sale casi gratis: **0,03 s de CPU en 30 s (~0,1 % de un
-núcleo) y 26 MB**. El dibujo está en dos capas y solo se repinta a Clawd entre
-fotogramas; el plato, los anillos y el badge —que son casi todos los píxeles suavizados—
-se cachean hasta que cambian los datos.
-
-La primera vez que consulta sola avisa con una notificación de escritorio. Es lo que evita
-que una acción automática sorprenda, y por eso el interruptor viene encendido en vez de
-venir apagado donde no lo encontraría nadie.
-
-Los ajustes viven en `%APPDATA%\ClaudePet\state.json`: `auto_force_enabled`,
-`auto_force_seconds`, `auto_force_notified` y `notify_enabled`.
+Los ajustes viven en `%APPDATA%\ClaudePet\state.json`.
 
 ## Sin instalar nada
 
@@ -237,23 +216,12 @@ Es el equivalente exacto del `xattr -dr com.apple.quarantine` que hace falta en 
 ## Estructura
 
 ```
-claudepet/usage.py     lectura y fusión de fuentes — copia literal de la de Linux
-claudepet/state.py     ajustes en %APPDATA%\ClaudePet\state.json — sin dependencias
-claudepet/runner.py    lanza `claude -p /usage` — sin nada de interfaz
-claudepet/sprite.py    Clawd en pixel-art, escritor de PNG con zlib y de .ico con struct
-claudepet/hub.py       temporizadores, lectura única y avisos al cruzar 50/70/90 %
-claudepet/win32.py     los enlaces con ctypes: constantes, estructuras y prototipos
-claudepet/loop.py      el bucle de mensajes, los temporizadores y el paso entre hilos
-claudepet/draw.py      el rasterizador con antialiasing y el texto por GDI
-claudepet/icon.py      el HICON de la bandeja, con la cifra dentro
-claudepet/menu.py      los menús emergentes
-claudepet/tray.py      el icono de la bandeja y su menú
-claudepet/pet.py       la mascota: ventana en capas, gestos y colocación
-claudepet/notify.py    el globo de aviso y el respaldo que nunca calla
-claudepet/app.py       arranque: instancia única, DPI, y todo sobre un bucle
-claudepet/__main__.py  --dump, --icon, --ico, --autostart, --pet, --pet-png
-build-zip.py           empaqueta el .zip portable
-medir-cpu.ps1          mide lo que cuesta una consulta y lo que cuesta la mascota
+claudepet/
+  usage.py   win32.py   loop.py   draw.py   icon.py
+  menu.py    tray.py    pet.py    notify.py  app.py
+  hub.py     runner.py  sprite.py state.py  __main__.py
+build-zip.py    # genera el .zip portable
+medir-cpu.ps1   # mide el coste de /usage y de la mascota
 ```
 
 ## Si algo falla

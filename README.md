@@ -124,7 +124,9 @@ Lo único que puede preguntar:
 - **Ítems de inicio**, si activas «Abrir al iniciar sesión» (vía `SMAppService`, sin diálogo).
 
 ```bash
-ClaudePet.app/Contents/MacOS/ClaudePet --dump   # diagnóstico: permisos, fuentes y cifras
+ClaudePet.app/Contents/MacOS/ClaudePet --dump   # macOS
+claudepet --dump                                 # Linux / Windows (instalado)
+python -X utf8 -m claudepet --dump               # Windows (desde windows\)
 ```
 
 ## Uso
