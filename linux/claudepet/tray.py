@@ -214,7 +214,10 @@ class Tray:
         self.ind.set_label(data.compact_text, "100/100%")
 
         rows = []
-        for limit in [l for l in (data.session, data.weekly) if l] + data.others:
+        # Pro/Max: session + weekly; Enterprise: los dos más usados como sustituto.
+        # `others` ya excluye esos dos para evitar duplicados.
+        top = [l for l in (data.session, data.weekly) if l] or data._fallback_top[:2]
+        for limit in top + data.others:
             line = f"{limit.label}   {limit.percent}%"
             if limit.detail:
                 line += f"   ({limit.detail})"

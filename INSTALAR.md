@@ -44,6 +44,44 @@ todos los usuarios de la máquina. Detalle en [`linux/README.md`](linux/README.m
 
 ---
 
+## En Windows
+
+También **sin administrador**:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
+powershell -ExecutionPolicy Bypass -File .\install-windows.ps1 off
+```
+
+El `-ExecutionPolicy Bypass` no es un truco para saltarse nada: el valor por defecto en
+Windows 11 es `Restricted`, que no deja ejecutar **ningún** script, ni siquiera uno tuyo
+guardado en tu propio disco.
+
+**Qué escribe**: `%LOCALAPPDATA%\Programs\ClaudePet` (la app), `%APPDATA%\ClaudePet`
+(los ajustes), los dos accesos directos del menú Inicio y del arranque automático, y una
+entrada en `HKCU\Environment` para poder escribir `claudepet` en una terminal.
+
+**Qué no toca nunca**: `HKLM`, `Program Files`, servicios, el PATH de la máquina, y
+`~\.claude\.credentials.json`, que está justo al lado del `settings.json` que sí lee.
+
+Si no tienes Python, el instalador lo pone con `winget` en ámbito de usuario, que tampoco
+pide contraseña. No hay firewall de por medio: la app no abre ni un socket. Y no hace
+falta excluir nada del antivirus ni firmar nada, porque no se instala ningún ejecutable
+propio.
+
+Lo único que puede pedirte Windows es **desbloquear los archivos** si te llegaron dentro
+de un `.zip` descargado: todo lo que sale de una descarga viene con la Marca de la Web y
+PowerShell se niega a ejecutarlo. Es el equivalente exacto del `xattr -dr
+com.apple.quarantine` de macOS que se explica más abajo:
+
+```powershell
+Unblock-File -Path .\*.ps1
+```
+
+Detalle en [`windows/README.md`](windows/README.md).
+
+---
+
 ## Opción A — compilarla (recomendada)
 
 Al compilarla en tu propia máquina no hay cuarentena ni Gatekeeper de por medio.
@@ -129,3 +167,7 @@ rm -rf /Applications/ClaudePet.app    # borrar la app
 No deja nada más: sus ajustes viven en `~/Library/Preferences/com.mario.claudepet.plist`
 y nunca escribe fuera de ahí. Si además instalaste el hook de statusLine,
 `./uninstall-statusline.sh` lo revierte.
+
+En Ubuntu es `./install-linux.sh --user off`, y en Windows
+`powershell -ExecutionPolicy Bypass -File .\install-windows.ps1 off`. Los dos preguntan
+si quitar también el hook y los dos conservan tus ajustes, por si vuelves.

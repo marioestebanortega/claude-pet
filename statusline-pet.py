@@ -4,7 +4,14 @@ Hook de statusLine para Claude Code.
 Guarda el bloque `rate_limits` en ~/.claude/pet-usage.json (para Claude Pet)
 e imprime una línea de estado. No consume cuota: corre 100% local.
 """
-import fcntl, json, os, sys, time
+import json, os, sys, time
+
+try:
+    import fcntl                          # POSIX
+    msvcrt = None
+except ImportError:                       # Windows no tiene fcntl
+    fcntl = None
+    import msvcrt
 
 HOME = os.path.expanduser("~")
 OUT = os.path.join(HOME, ".claude", "pet-usage.json")
@@ -53,6 +60,45 @@ def merge(new, old):
                 out[key] = w
     return out
 
+def _lock(fd):
+    """Candado exclusivo NO bloqueante. Devuelve False si lo tiene otra sesión.
+
+    POSIX: `flock` sobre el archivo entero, con LOCK_NB.
+
+    Windows no tiene `flock`. `msvcrt.locking` bloquea un RANGO de bytes desde la
+    posición actual, así que se busca siempre el byte 0 y se coge uno: de ese modo
+    todas las sesiones compiten por la misma región. Bloquear más allá del fin de
+    archivo es legal en Win32, o sea que el `.lock` puede seguir midiendo cero
+    bytes.
+
+    El modo es `LK_NBLCK` y no `LK_LOCK` a propósito: `LK_LOCK` reintenta diez
+    veces con un segundo de espera antes de rendirse, o sea que dejaría la línea
+    de estado colgada hasta diez segundos. `LK_NBLCK` lanza `OSError` al instante,
+    que es justo el `LOCK_NB` que esta función quiere.
+    """
+    try:
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        return True
+    except OSError:
+        return False
+
+
+def _unlock(fd):
+    """En POSIX el candado se suelta solo al cerrar el descriptor; en Windows hay
+    que soltarlo a mano, porque cerrar con regiones bloqueadas es comportamiento
+    indefinido según la documentación de `_locking`."""
+    if fcntl is None:
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+
+
 def save(rl):
     """Funde con lo guardado y reescribe el archivo. Devuelve lo que quedó.
 
@@ -65,11 +111,11 @@ def save(rl):
     Un `.tmp` por PID para que dos sesiones no se pisen el archivo intermedio.
     """
     fd = None
+    locked = False
     try:
         fd = os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o644)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        locked = _lock(fd)
+        if not locked:
             return None                   # otra sesión está escribiendo
         old = {}
         try:
@@ -100,6 +146,8 @@ def save(rl):
         return None
     finally:
         if fd is not None:
+            if locked:
+                _unlock(fd)               # en Windows, antes de cerrar
             os.close(fd)                  # soltar el candado
 
 
